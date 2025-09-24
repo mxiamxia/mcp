@@ -70,6 +70,387 @@ def remove_null_values(data: dict) -> dict:
 
 
 @mcp.tool()
+async def get_enablement_guide(
+    platform: str = Field(
+        default='lambda',
+        description='AWS platform to enable Application Signals for (lambda, ecs, eks, ec2). Default: lambda',
+    ),
+) -> str:
+    """Get comprehensive guide for enabling AWS Application Signals on various AWS platforms.
+
+    Use this tool to:
+    - Get step-by-step instructions for enabling Application Signals
+    - Learn about required configurations and prerequisites
+    - Understand IAM permissions and layer requirements
+    - Get complete CDK/Terraform examples
+    - Troubleshoot common enablement issues
+
+    Supported platforms:
+    - lambda: AWS Lambda functions (detailed guide available)
+    - ecs: Amazon Elastic Container Service
+    - eks: Amazon Elastic Kubernetes Service
+    - ec2: Amazon EC2 instances
+
+    Returns:
+    - Complete enablement guide with code examples
+    - Configuration steps in correct order
+    - IAM permission requirements
+    - Troubleshooting tips
+    - Verification methods
+
+    This tool provides the foundational knowledge needed before using other
+    Application Signals monitoring tools in this MCP server.
+    """
+    start_time_perf = timer()
+    logger.info(f'Starting get_enablement_guide request for platform: {platform}')
+
+    try:
+        if platform.lower() == 'lambda':
+            # Read the Lambda enablement guide from the markdown file
+            import os
+
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            guide_path = os.path.join(
+                os.path.dirname(os.path.dirname(current_dir)), 'lambda_enablement.md'
+            )
+
+            try:
+                with open(guide_path, 'r', encoding='utf-8') as file:
+                    lambda_guide = file.read()
+
+                result = 'AWS Application Signals Enablement Guide - Lambda Platform\n'
+                result += '=' * 60 + '\n\n'
+                result += lambda_guide
+
+                elapsed_time = timer() - start_time_perf
+                logger.info(
+                    f'get_enablement_guide completed for {platform} in {elapsed_time:.3f}s'
+                )
+                return result
+
+            except FileNotFoundError:
+                logger.warning(f'Lambda enablement guide file not found at: {guide_path}')
+                return 'Lambda enablement guide file not found. Please ensure lambda_enablement.md exists in the project root.'
+
+        elif platform.lower() == 'ecs':
+            # Read the ECS enablement guide from the markdown file
+            import os
+
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            guide_path = os.path.join(current_dir, 'ecs_enablement.md')
+
+            try:
+                with open(guide_path, 'r', encoding='utf-8') as file:
+                    ecs_guide = file.read()
+
+                result = 'AWS Application Signals Enablement Guide - ECS Platform\n'
+                result += '=' * 60 + '\n\n'
+                result += ecs_guide
+
+                elapsed_time = timer() - start_time_perf
+                logger.info(
+                    f'get_enablement_guide completed for {platform} in {elapsed_time:.3f}s'
+                )
+                return result
+
+            except FileNotFoundError:
+                logger.warning(f'ECS enablement guide file not found at: {guide_path}')
+                return 'ECS enablement guide file not found. Please ensure ecs_enablement.md exists in the awslabs/cloudwatch_appsignals_mcp_server/ directory.'
+
+        else:
+            # For other platforms, provide general guidance
+            result = f'AWS Application Signals Enablement Guide - {platform.upper()} Platform\n'
+            result += '=' * 60 + '\n\n'
+
+            if platform.lower() == 'eks':
+                result += """## Amazon EKS Configuration
+
+**Recommended Approach**: Use the CloudWatch Observability add-on for simplified setup and management.
+
+### Prerequisites
+- EKS cluster running Kubernetes version 1.25 or later
+- kubectl configured to communicate with your cluster
+- AWS CLI configured with appropriate permissions
+
+### Step 1: Enable Application Signals Discovery
+Add Application Signals Discovery to your AWS account:
+```typescript
+import * as applicationsignals from 'aws-cdk-lib/aws-applicationsignals';
+
+const cfnDiscovery = new applicationsignals.CfnDiscovery(this, 'ApplicationSignalsDiscovery', {});
+```
+
+### Step 2: Install CloudWatch Observability Add-on
+
+#### Option A: Using AWS CLI
+```bash
+aws eks create-addon \\
+    --cluster-name your-cluster-name \\
+    --addon-name amazon-cloudwatch-observability \\
+    --addon-version v1.6.0-eksbuild.1 \\
+    --resolve-conflicts OVERWRITE
+```
+
+#### Option B: Using CDK
+```typescript
+import * as eks from 'aws-cdk-lib/aws-eks';
+
+// Add to your existing EKS cluster
+cluster.addAddon('amazon-cloudwatch-observability', {
+    version: 'v1.6.0-eksbuild.1',
+    resolveConflicts: eks.ResolveConflicts.OVERWRITE,
+});
+```
+
+#### Option C: Using eksctl
+```bash
+eksctl create addon \\
+    --name amazon-cloudwatch-observability \\
+    --cluster your-cluster-name \\
+    --version v1.6.0-eksbuild.1 \\
+    --force
+```
+
+### Step 3: Configure IRSA (IAM Roles for Service Accounts)
+Create IAM role for CloudWatch Observability:
+```bash
+eksctl create iamserviceaccount \\
+    --name cloudwatch-agent \\
+    --namespace amazon-cloudwatch \\
+    --cluster your-cluster-name \\
+    --attach-policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy \\
+    --attach-policy-arn arn:aws:iam::aws:policy/CloudWatchApplicationSignalsFullAccess \\
+    --approve
+```
+
+### Step 4: Configure Application Auto-instrumentation
+
+#### For Java Applications:
+Add annotations to your deployment:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-java-app
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-java: "true"
+        instrumentation.opentelemetry.io/container-names: "my-container"
+    spec:
+      containers:
+      - name: my-container
+        image: my-java-app:latest
+        env:
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=my-java-app,deployment.environment=eks"
+        - name: OTEL_AWS_APPLICATION_SIGNALS_ENABLED
+          value: "true"
+```
+
+#### For Python Applications:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-python-app
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
+        instrumentation.opentelemetry.io/container-names: "my-container"
+    spec:
+      containers:
+      - name: my-container
+        image: my-python-app:latest
+        env:
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=my-python-app,deployment.environment=eks"
+        - name: OTEL_AWS_APPLICATION_SIGNALS_ENABLED
+          value: "true"
+```
+
+#### For Node.js Applications:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-node-app
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-nodejs: "true"
+        instrumentation.opentelemetry.io/container-names: "my-container"
+    spec:
+      containers:
+      - name: my-container
+        image: my-node-app:latest
+        env:
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=my-node-app,deployment.environment=eks"
+        - name: OTEL_AWS_APPLICATION_SIGNALS_ENABLED
+          value: "true"
+```
+
+#### For .NET Applications:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-dotnet-app
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-dotnet: "true"
+        instrumentation.opentelemetry.io/container-names: "my-container"
+    spec:
+      containers:
+      - name: my-container
+        image: my-dotnet-app:latest
+        env:
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=my-dotnet-app,deployment.environment=eks"
+        - name: OTEL_AWS_APPLICATION_SIGNALS_ENABLED
+          value: "true"
+```
+
+### Step 5: Verify Installation
+
+#### Check Add-on Status:
+```bash
+aws eks describe-addon \\
+    --cluster-name your-cluster-name \\
+    --addon-name amazon-cloudwatch-observability
+```
+
+#### Check Pods:
+```bash
+kubectl get pods -n amazon-cloudwatch
+kubectl get pods -n opentelemetry-operator-system
+```
+
+#### Check Auto-instrumentation:
+```bash
+kubectl get instrumentation -n default
+```
+
+### Verification Steps:
+1. Generate traffic to your instrumented applications
+2. Check CloudWatch Application Signals console for services
+3. Verify traces and metrics are being collected
+4. Check service map for dependency visualization
+
+### Troubleshooting:
+- **Add-on installation fails**: Check IAM permissions and cluster version compatibility
+- **Auto-instrumentation not working**: Verify annotations and environment variables
+- **Missing metrics**: Check CloudWatch agent configuration and IRSA permissions
+- **Service not appearing**: Ensure traffic is generated and OTEL configuration is correct
+
+### Important Notes:
+- CloudWatch Observability add-on simplifies the entire observability setup
+- Automatically installs and configures CloudWatch Agent, Fluent Bit, and ADOT components
+- Supports zero-code instrumentation through annotations
+- Recommended for production workloads due to AWS support and maintenance
+
+### Documentation Reference:
+For detailed instructions, see: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Application-Signals-Enable-EKS.html
+"""
+
+            elif platform.lower() == 'ec2':
+                result += """## Amazon EC2 Configuration
+
+### Step 1: Install CloudWatch Agent
+Install and configure CloudWatch agent on your EC2 instances.
+
+### Step 2: Install ADOT Collector
+```bash
+# Download and install ADOT Collector
+wget https://github.com/aws-observability/aws-otel-collector/releases/latest/download/aws-otel-collector.rpm
+sudo rpm -ivh aws-otel-collector.rpm
+```
+
+### Step 3: Configure Application Signals
+Create collector configuration file with Application Signals settings.
+
+### Step 4: Configure IAM Permissions
+Attach IAM role with CloudWatchApplicationSignalsFullAccess to EC2 instances.
+
+### Step 5: Instrument Applications
+Add OpenTelemetry instrumentation to your applications running on EC2.
+
+### Verification:
+- Check collector is running and configured correctly
+- Verify Application Signals data appears in console
+"""
+
+            else:
+                result += f"""## Platform: {platform.upper()}
+
+Currently, detailed enablement guides are available for:
+- **lambda**: AWS Lambda functions (comprehensive guide available)
+- **ecs**: Amazon Elastic Container Service (basic guidance)
+- **eks**: Amazon Elastic Kubernetes Service (basic guidance)
+- **ec2**: Amazon EC2 instances (basic guidance)
+
+### General Steps for Application Signals:
+
+1. **Enable Discovery**: Add Application Signals Discovery configuration
+2. **Configure Permissions**: Set up IAM roles with Application Signals policies
+3. **Install Instrumentation**: Deploy ADOT collectors or SDK instrumentation
+4. **Configure Service**: Add necessary environment variables and settings
+5. **Verify Setup**: Check Application Signals console for telemetry data
+
+### Common Requirements:
+- AWS Account with Application Signals enabled
+- Appropriate IAM permissions (CloudWatchApplicationSignalsFullAccess)
+- OpenTelemetry instrumentation (ADOT or SDK)
+- Service configuration for telemetry collection
+
+For platform-specific details, please refer to AWS documentation or use 'lambda' platform for the most comprehensive guide.
+"""
+
+            result += f"""
+
+## Next Steps
+
+After enabling Application Signals for {platform.upper()}:
+
+1. **Verify Setup**: Use the `list_monitored_services()` tool to see your services
+2. **Check Health**: Use `list_slis()` to monitor SLO compliance
+3. **Investigate Issues**: Use `get_service_detail()` for service-specific information
+4. **Query Metrics**: Use `query_service_metrics()` for performance analysis
+5. **Analyze Traces**: Use `search_transaction_spans()` or `query_sampled_traces()` for troubleshooting
+
+## Support Resources
+
+- AWS Application Signals Documentation
+- AWS Distro for OpenTelemetry (ADOT) Documentation
+- OpenTelemetry Community Resources
+- AWS Support for enterprise customers
+
+## Important Notes
+
+- Application Signals incurs additional CloudWatch costs
+- Ensure proper sampling rates to manage cost and performance
+- Regular updates to ADOT components recommended for latest features
+"""
+
+            elapsed_time = timer() - start_time_perf
+            logger.info(f'get_enablement_guide completed for {platform} in {elapsed_time:.3f}s')
+            return result
+
+    except Exception as e:
+        logger.error(
+            f'Unexpected error in get_enablement_guide for {platform}: {str(e)}', exc_info=True
+        )
+        return f'Error retrieving enablement guide for {platform}: {str(e)}'
+
+
+@mcp.tool()
 async def list_monitored_services() -> str:
     """List all services monitored by AWS Application Signals.
 
