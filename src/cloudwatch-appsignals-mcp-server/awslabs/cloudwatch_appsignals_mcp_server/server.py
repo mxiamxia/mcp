@@ -106,31 +106,16 @@ async def get_enablement_guide(
 
     try:
         if platform.lower() == 'lambda':
-            # Read the Lambda enablement guide from the markdown file
-            import os
+            # Import the Lambda enablement guide from Python module
+            from .lambda_enablement_guide import LAMBDA_ENABLEMENT_GUIDE
 
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            guide_path = os.path.join(
-                os.path.dirname(os.path.dirname(current_dir)), 'lambda_enablement.md'
-            )
+            result = 'AWS Application Signals Enablement Guide - Lambda Platform\n'
+            result += '=' * 60 + '\n\n'
+            result += LAMBDA_ENABLEMENT_GUIDE
 
-            try:
-                with open(guide_path, 'r', encoding='utf-8') as file:
-                    lambda_guide = file.read()
-
-                result = 'AWS Application Signals Enablement Guide - Lambda Platform\n'
-                result += '=' * 60 + '\n\n'
-                result += lambda_guide
-
-                elapsed_time = timer() - start_time_perf
-                logger.info(
-                    f'get_enablement_guide completed for {platform} in {elapsed_time:.3f}s'
-                )
-                return result
-
-            except FileNotFoundError:
-                logger.warning(f'Lambda enablement guide file not found at: {guide_path}')
-                return 'Lambda enablement guide file not found. Please ensure lambda_enablement.md exists in the project root.'
+            elapsed_time = timer() - start_time_perf
+            logger.info(f'get_enablement_guide completed for {platform} in {elapsed_time:.3f}s')
+            return result
 
         elif platform.lower() == 'ecs':
             # Read the ECS enablement guide from the markdown file
