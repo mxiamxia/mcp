@@ -76,30 +76,40 @@ async def get_enablement_guide(
         description='AWS platform to enable Application Signals for (lambda, ecs, eks, ec2). Default: lambda',
     ),
 ) -> str:
-    """Get comprehensive guide for enabling AWS Application Signals on various AWS platforms.
+    """Enable AWS Application Signals for your services - get complete setup instructions.
 
-    Use this tool to:
-    - Get step-by-step instructions for enabling Application Signals
-    - Learn about required configurations and prerequisites
-    - Understand IAM permissions and layer requirements
-    - Get complete CDK/Terraform examples
-    - Troubleshoot common enablement issues
+    Use this tool whenever users ask to:
+    - "Enable Application Signals" for any service or platform
+    - "Set up Application Signals" for Lambda, ECS, EKS, or EC2
+    - "Configure monitoring" for AWS services
+    - "Add observability" to their applications
+    - Get help with "Application Signals setup"
+    - Troubleshoot Application Signals enablement issues
 
-    Supported platforms:
-    - lambda: AWS Lambda functions (detailed guide available)
-    - ecs: Amazon Elastic Container Service
-    - eks: Amazon Elastic Kubernetes Service
-    - ec2: Amazon EC2 instances
+    This tool provides step-by-step enablement instructions for:
+    - **lambda**: AWS Lambda functions (comprehensive 7-step guide with CDK examples)
+    - **ecs**: Amazon Elastic Container Service (4-step zero-code instrumentation)
+    - **eks**: Amazon Elastic Kubernetes Service (CloudWatch Observability add-on)
+    - **ec2**: Amazon EC2 instances (ADOT collector setup)
 
-    Returns:
-    - Complete enablement guide with code examples
-    - Configuration steps in correct order
-    - IAM permission requirements
-    - Troubleshooting tips
-    - Verification methods
+    Perfect for questions like:
+    - "How do I enable Application Signals for my Lambda function?"
+    - "Can you enable Application Signals for lambda-audit-service?"
+    - "Set up monitoring for my ECS service"
+    - "Configure Application Signals on EKS"
+    - "I need to add observability to my application"
 
-    This tool provides the foundational knowledge needed before using other
-    Application Signals monitoring tools in this MCP server.
+    Returns complete enablement guide with:
+    - Prerequisites and constraints
+    - Step-by-step configuration instructions
+    - Complete CDK/CloudFormation code examples
+    - IAM permissions and environment variables
+    - Layer ARNs and configuration settings
+    - Verification and troubleshooting steps
+    - Integration with other MCP monitoring tools
+
+    This is the primary tool for Application Signals enablement - use it first
+    before other monitoring tools in this MCP server.
     """
     start_time_perf = timer()
     logger.info(f'Starting get_enablement_guide request for platform: {platform}')
