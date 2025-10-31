@@ -72,21 +72,22 @@ def remove_null_values(data: dict) -> dict:
 @mcp.tool()
 async def get_enablement_guide(
     platform: str = Field(
-        default='lambda',
-        description='AWS platform to enable Application Signals for (lambda, ecs, eks, ec2). Default: lambda',
+        default='bedrock',
+        description='AWS platform to enable Application Signals for (bedrock, lambda, ecs, eks, ec2). Default: bedrock',
     ),
 ) -> str:
     """Enable AWS Application Signals for your services - get complete setup instructions.
 
     Use this tool whenever users ask to:
     - "Enable Application Signals" for any service or platform
-    - "Set up Application Signals" for Lambda, ECS, EKS, or EC2
+    - "Set up Application Signals" for BedRock, Lambda, ECS, EKS, or EC2
     - "Configure monitoring" for AWS services
     - "Add observability" to their applications
     - Get help with "Application Signals setup"
     - Troubleshoot Application Signals enablement issues
 
     This tool provides step-by-step enablement instructions for:
+    - **bedrock**: Python-based AWS Bedrock Agent Core Runtime (3-step Dockerfile modification)
     - **lambda**: AWS Lambda functions (comprehensive 7-step guide with CDK examples)
     - **ecs**: Amazon Elastic Container Service (4-step zero-code instrumentation)
     - **eks**: Amazon Elastic Kubernetes Service (CloudWatch Observability add-on)
@@ -122,6 +123,18 @@ async def get_enablement_guide(
             result = 'AWS Application Signals Enablement Guide - Lambda Platform\n'
             result += '=' * 60 + '\n\n'
             result += LAMBDA_ENABLEMENT_GUIDE
+
+            elapsed_time = timer() - start_time_perf
+            logger.info(f'get_enablement_guide completed for {platform} in {elapsed_time:.3f}s')
+            return result
+
+        elif platform.lower() == 'bedrock':
+            # Import the Bedrock enablement guide from Python module
+            from .bedrock_enablement_guide import BEDROCK_ENABLEMENT_GUIDE
+
+            result = 'AWS Application Signals Enablement Guide - Bedrock Agent Core Runtime\n'
+            result += '=' * 60 + '\n\n'
+            result += BEDROCK_ENABLEMENT_GUIDE
 
             elapsed_time = timer() - start_time_perf
             logger.info(f'get_enablement_guide completed for {platform} in {elapsed_time:.3f}s')
