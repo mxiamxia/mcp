@@ -26,18 +26,51 @@ The remote MCP server allows clients to connect over HTTP using Server-Sent Even
 ssh -i your-key.pem ec2-user@your-ec2-public-ip
 ```
 
-### 2. Install Python and dependencies
+### 2. Install Python 3.10+ and dependencies
 
-**Amazon Linux 2023 / Amazon Linux 2:**
+**IMPORTANT:** This MCP server requires Python 3.10 or higher.
+
+**Amazon Linux 2023:**
 ```bash
 sudo yum update -y
-sudo yum install python3 python3-pip git -y
+sudo yum install python3.11 python3.11-pip git -y
+
+# Verify Python version
+python3.11 --version  # Should show 3.11.x
+```
+
+**Amazon Linux 2:**
+```bash
+# Option 1: Try Amazon Linux Extras (if available)
+sudo amazon-linux-extras enable python3.11
+sudo yum install python3.11 python3.11-pip git -y
+
+# Option 2: Build Python 3.11 from source (if extras not available)
+sudo yum update -y
+sudo yum groupinstall "Development Tools" -y
+sudo yum install openssl-devel bzip2-devel libffi-devel wget -y
+
+cd /tmp
+wget https://www.python.org/ftp/python/3.11.8/Python-3.11.8.tgz
+tar xzf Python-3.11.8.tgz
+cd Python-3.11.8
+./configure --enable-optimizations
+sudo make altinstall
+
+# Verify installation
+python3.11 --version
+
+# Install git
+sudo yum install git -y
 ```
 
 **Ubuntu:**
 ```bash
 sudo apt update
-sudo apt install python3 python3-pip git -y
+sudo apt install python3.10 python3.10-venv python3.10-dev python3-pip git -y
+
+# Verify Python version
+python3.10 --version  # Should show 3.10.x or higher
 ```
 
 ### 3. Clone the repository and install
@@ -48,8 +81,21 @@ git clone https://github.com/awslabs/mcp.git
 cd mcp/src/cloudwatch-applicationsignals-mcp-server
 git checkout rmt-server
 
+# Create virtual environment with Python 3.10+
+# For Amazon Linux 2023/AL2:
+python3.11 -m venv venv
+
+# For Ubuntu:
+# python3.10 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Upgrade pip
+pip install --upgrade pip
+
 # Install the package
-pip3 install -e .
+pip install -e .
 ```
 
 ## Configuration
@@ -102,19 +148,30 @@ The server will automatically use the EC2 instance's IAM role credentials.
 ### Method 1: Direct Python Command
 
 ```bash
-python3 -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
+# Make sure virtual environment is activated
+source venv/bin/activate
+
+# Run the server
+python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
 ```
 
 Or using the installed script:
 
 ```bash
+# Make sure virtual environment is activated
+source venv/bin/activate
+
 awslabs.cloudwatch-applicationsignals-mcp-server-remote
 ```
 
 ### Method 2: Using nohup (Background Process)
 
 ```bash
-nohup python3 -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server > server.log 2>&1 &
+# Make sure virtual environment is activated
+source venv/bin/activate
+
+# Start server in background
+nohup python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server > server.log 2>&1 &
 ```
 
 View logs:
@@ -282,8 +339,11 @@ top -p <PID>
 
 3. Check Python version:
    ```bash
-   python3 --version  # Should be 3.10 or higher
+   python3.11 --version  # Should be 3.10 or higher (3.11 recommended)
+   # Or python3.10 --version on Ubuntu
    ```
+
+   If you get "Python 3.9.x" or lower, you need to install Python 3.10+ (see installation section above)
 
 ### Connection refused
 
