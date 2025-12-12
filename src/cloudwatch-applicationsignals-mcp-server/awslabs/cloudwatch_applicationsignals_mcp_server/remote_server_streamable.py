@@ -14,8 +14,6 @@
 
 """CloudWatch Application Signals MCP Server - Remote Streamable HTTP Server."""
 
-import asyncio
-import json
 import os
 import sys
 import uvicorn
@@ -52,7 +50,7 @@ streamable_transport = StreamableHTTPTransport(endpoint='/mcp')
 
 # Message handler that integrates with FastMCP
 async def handle_mcp_message(message: JSONRPCMessage) -> dict:
-    """Handle JSON-RPC messages from MCP clients.
+    """Handle JSON-RPC messages from MCP clients by calling MCP server directly.
 
     Args:
         message: The JSON-RPC message
@@ -63,66 +61,12 @@ async def handle_mcp_message(message: JSONRPCMessage) -> dict:
     try:
         logger.debug(f'Processing MCP message: {message}')
 
-        # Create a simple queue-based communication with the MCP server
-        request_queue = asyncio.Queue()
-        response_queue = asyncio.Queue()
+        # Call the MCP server's request handler directly
+        # This is much faster than trying to simulate a full connection
+        response = await mcp._mcp_server._handle_request(message)
 
-        # Put the message in the request queue
-        await request_queue.put(json.dumps(message).encode('utf-8') + b'\n')
-
-        # Create a task to run the MCP server
-        async def read_stream():
-            return await request_queue.get()
-
-        async def write_stream(data: bytes):
-            await response_queue.put(data)
-
-        # Simple stream interface
-        class SimpleReadStream:
-            async def readline(self):
-                return await read_stream()
-
-            async def read(self, n=-1):
-                return await read_stream()
-
-        class SimpleWriteStream:
-            async def write(self, data: bytes):
-                await write_stream(data)
-
-            async def drain(self):
-                pass
-
-        read_stream_obj = SimpleReadStream()
-        write_stream_obj = SimpleWriteStream()
-
-        # Run the MCP server with this message
-        # Note: This is a simplified approach; in production, maintain persistent connection
-        task = asyncio.create_task(
-            mcp._mcp_server.run(
-                read_stream_obj,
-                write_stream_obj,
-                mcp._mcp_server.create_initialization_options(),
-            )
-        )
-
-        # Wait for response with timeout
-        try:
-            response_data = await asyncio.wait_for(response_queue.get(), timeout=30.0)
-            response = json.loads(response_data.decode('utf-8'))
-            return response
-        except asyncio.TimeoutError:
-            logger.error('Timeout waiting for MCP server response')
-            return {
-                'jsonrpc': '2.0',
-                'id': message.get('id'),
-                'error': {'code': -32603, 'message': 'Internal error: timeout'},
-            }
-        finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        logger.debug(f'MCP response: {response}')
+        return response
 
     except Exception as e:
         logger.error(f'Error handling MCP message: {e}', exc_info=True)
