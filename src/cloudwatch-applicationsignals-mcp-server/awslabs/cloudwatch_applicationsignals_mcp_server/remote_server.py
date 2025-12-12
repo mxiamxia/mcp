@@ -34,6 +34,8 @@ HOST = os.environ.get('MCP_HOST', '0.0.0.0')
 MCP_API_KEY = os.environ.get('MCP_API_KEY', 'your-test-key')  # Optional API key for simple auth
 
 # SSL/TLS configuration
+# Set DISABLE_SSL=true to force HTTP mode (useful for running behind ALB/CloudFront)
+DISABLE_SSL = os.environ.get('DISABLE_SSL', 'false').lower() == 'true'
 SSL_KEYFILE = os.environ.get('SSL_KEYFILE', '/home/ec2-user/ssl/server.key')
 SSL_CERTFILE = os.environ.get('SSL_CERTFILE', '/home/ec2-user/ssl/server.crt')
 
@@ -148,8 +150,9 @@ def main():
     logger.remove()  # Remove default handler
     logger.add(sys.stderr, level=log_level)
 
-    # Check if SSL files exist
-    ssl_enabled = os.path.exists(SSL_KEYFILE) and os.path.exists(SSL_CERTFILE)
+    # Check if SSL should be enabled
+    # SSL is disabled if DISABLE_SSL=true or if SSL files don't exist
+    ssl_enabled = not DISABLE_SSL and os.path.exists(SSL_KEYFILE) and os.path.exists(SSL_CERTFILE)
     protocol = 'https' if ssl_enabled else 'http'
 
     logger.info('Starting CloudWatch Application Signals MCP Remote Server')
@@ -164,11 +167,15 @@ def main():
         logger.info(f'  Certificate: {SSL_CERTFILE}')
         logger.info(f'  Key: {SSL_KEYFILE}')
     else:
-        logger.warning('SSL/TLS: disabled (HTTP mode)')
-        logger.warning('  For remote access, MCP clients require HTTPS')
-        logger.warning('  Set SSL_KEYFILE and SSL_CERTFILE, or use default paths:')
-        logger.warning(f'    {SSL_KEYFILE}')
-        logger.warning(f'    {SSL_CERTFILE}')
+        if DISABLE_SSL:
+            logger.info('SSL/TLS: disabled (DISABLE_SSL=true, running in HTTP mode)')
+            logger.info('  Suitable for running behind ALB/CloudFront with SSL termination')
+        else:
+            logger.warning('SSL/TLS: disabled (HTTP mode)')
+            logger.warning('  For remote access, MCP clients require HTTPS')
+            logger.warning('  Set SSL_KEYFILE and SSL_CERTFILE, or use default paths:')
+            logger.warning(f'    {SSL_KEYFILE}')
+            logger.warning(f'    {SSL_CERTFILE}')
 
     logger.info('Endpoints:')
     logger.info(f'  Health Check: {protocol}://{HOST}:{PORT}/health')
