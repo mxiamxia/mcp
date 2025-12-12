@@ -194,6 +194,85 @@ kill <PID>
 ./start_remote_server.sh
 ```
 
+## Complete EC2 Setup Example
+
+Here's a complete step-by-step example using EC2 instance at **18.208.249.167**:
+
+### On Your EC2 Instance
+
+```bash
+# 1. SSH to your EC2 instance
+ssh -i your-key.pem ec2-user@18.208.249.167
+
+# 2. Install Python 3.11 (Amazon Linux 2023)
+sudo yum update -y
+sudo yum install python3.11 python3.11-pip git -y
+python3.11 --version  # Verify: should show 3.11.x
+
+# 3. Clone the repository
+cd /home/ec2-user
+git clone https://github.com/awslabs/mcp.git
+cd mcp/src/cloudwatch-applicationsignals-mcp-server
+git checkout rmt-server
+
+# 4. Set up virtual environment
+python3.11 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -e .
+
+# 5. Configure environment variables
+export AWS_REGION="us-east-1"
+export MCP_PORT=8000
+export MCP_HOST="0.0.0.0"
+
+# If using explicit AWS credentials:
+# export AWS_ACCESS_KEY_ID="your-access-key-id"  # pragma: allowlist secret
+# export AWS_SECRET_ACCESS_KEY="your-secret-access-key"  # pragma: allowlist secret
+
+# Or if using IAM role attached to EC2, no credentials needed!
+
+# 6. Start the server
+python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
+
+# Or run in background:
+# nohup python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server > server.log 2>&1 &
+```
+
+### Test from Your Local Machine
+
+```bash
+# Test health endpoint
+curl http://18.208.249.167:8000/health
+
+# Expected output:
+# {
+#   "status": "healthy",
+#   "service": "cloudwatch-applicationsignals-mcp-server",
+#   "version": "0.1.19",
+#   "region": "us-east-1",
+#   "transport": "sse"
+# }
+
+# Test server info
+curl http://18.208.249.167:8000/info
+```
+
+### Configure Your MCP Client
+
+Update your Claude Desktop or other MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "cloudwatch-appsignals-remote": {
+      "url": "http://18.208.249.167:8000/sse",
+      "transport": "sse"
+    }
+  }
+}
+```
+
 ## EC2 Security Group Configuration
 
 Configure your EC2 security group to allow inbound traffic:
