@@ -29,9 +29,13 @@ from starlette.routing import Mount, Route
 
 
 # Get configuration from environment variables
-PORT = int(os.environ.get('MCP_PORT', 8000))
+PORT = int(os.environ.get('MCP_PORT', 443))
 HOST = os.environ.get('MCP_HOST', '0.0.0.0')
-MCP_API_KEY = os.environ.get('MCP_API_KEY', '')  # Optional API key for simple auth
+MCP_API_KEY = os.environ.get('MCP_API_KEY', 'your-test-key')  # Optional API key for simple auth
+
+# SSL/TLS configuration
+SSL_KEYFILE = os.environ.get('SSL_KEYFILE', '/home/ec2-user/ssl/server.key')
+SSL_CERTFILE = os.environ.get('SSL_CERTFILE', '/home/ec2-user/ssl/server.crt')
 
 # Configure logging
 log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO').upper()
@@ -144,20 +148,52 @@ def main():
     logger.remove()  # Remove default handler
     logger.add(sys.stderr, level=log_level)
 
+    # Check if SSL files exist
+    ssl_enabled = os.path.exists(SSL_KEYFILE) and os.path.exists(SSL_CERTFILE)
+    protocol = 'https' if ssl_enabled else 'http'
+
     logger.info('Starting CloudWatch Application Signals MCP Remote Server')
     logger.info(f'Server: {HOST}:{PORT}')
     logger.info(f'Region: {AWS_REGION}')
+    logger.info(f'Protocol: {protocol.upper()}')
     logger.info('Transport: SSE')
     logger.info(f'Authentication: {"enabled" if MCP_API_KEY else "disabled (pass-through)"}')
+
+    if ssl_enabled:
+        logger.info('SSL/TLS: enabled')
+        logger.info(f'  Certificate: {SSL_CERTFILE}')
+        logger.info(f'  Key: {SSL_KEYFILE}')
+    else:
+        logger.warning('SSL/TLS: disabled (HTTP mode)')
+        logger.warning('  For remote access, MCP clients require HTTPS')
+        logger.warning('  Set SSL_KEYFILE and SSL_CERTFILE, or use default paths:')
+        logger.warning(f'    {SSL_KEYFILE}')
+        logger.warning(f'    {SSL_CERTFILE}')
+
     logger.info('Endpoints:')
-    logger.info(f'  Health Check: http://{HOST}:{PORT}/health')
-    logger.info(f'  Server Info: http://{HOST}:{PORT}/info')
-    logger.info(f'  SSE Endpoint: http://{HOST}:{PORT}/sse')
+    logger.info(f'  Health Check: {protocol}://{HOST}:{PORT}/health')
+    logger.info(f'  Server Info: {protocol}://{HOST}:{PORT}/info')
+    logger.info(f'  SSE Endpoint: {protocol}://{HOST}:{PORT}/sse')
 
     try:
-        uvicorn.run(
-            app, host=HOST, port=PORT, log_level=log_level.lower(), access_log=log_level == 'DEBUG'
-        )
+        if ssl_enabled:
+            uvicorn.run(
+                app,
+                host=HOST,
+                port=PORT,
+                log_level=log_level.lower(),
+                access_log=log_level == 'DEBUG',
+                ssl_keyfile=SSL_KEYFILE,
+                ssl_certfile=SSL_CERTFILE,
+            )
+        else:
+            uvicorn.run(
+                app,
+                host=HOST,
+                port=PORT,
+                log_level=log_level.lower(),
+                access_log=log_level == 'DEBUG',
+            )
     except KeyboardInterrupt:
         logger.info('Server shutdown by user')
     except Exception as e:
