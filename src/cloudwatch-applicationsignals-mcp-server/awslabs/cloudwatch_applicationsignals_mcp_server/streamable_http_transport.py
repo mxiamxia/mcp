@@ -156,24 +156,31 @@ class StreamableHTTPTransport:
         Returns:
             JSON response or StreamingResponse
         """
-        # Get session ID from header, or auto-generate if not provided
+        # Get session ID from header, or use stateless mode
         session_id = request.headers.get('Mcp-Session-Id')
+        is_stateless = False
 
         if not session_id:
-            # Auto-generate session ID for clients that don't provide it
+            # Stateless mode: generate temporary session ID for this request only
             session_id = str(uuid.uuid4())
-            logger.info(f'Auto-generated session ID for POST request: {session_id}')
+            is_stateless = True
+            logger.warning(
+                f'POST request without Mcp-Session-Id header - using stateless mode (session {session_id})'
+            )
+            logger.warning(
+                'Client should establish session via GET request first for bidirectional communication'
+            )
 
-        # Ensure session exists
+        # Ensure session exists (create if needed)
         if session_id not in self.sessions:
-            # Auto-create session if it doesn't exist
             self.sessions[session_id] = {
                 'id': session_id,
                 'queue': asyncio.Queue(),
                 'event_counter': 0,
                 'message_buffer': [],
+                'is_stateless': is_stateless,  # Mark for cleanup
             }
-            logger.info(f'Created session from POST: {session_id}')
+            logger.info(f'Created {"stateless " if is_stateless else ""}session: {session_id}')
 
         session = self.sessions[session_id]
 
@@ -188,10 +195,16 @@ class StreamableHTTPTransport:
             if self.message_handler:
                 response = await self.message_handler(message)
 
-                # Queue response for SSE stream
-                await session['queue'].put(response)
+                # Queue response for SSE stream (if not stateless)
+                if not is_stateless:
+                    await session['queue'].put(response)
 
-                # Also return directly for request/response pattern
+                # Cleanup stateless sessions immediately after response
+                if is_stateless and session_id in self.sessions:
+                    del self.sessions[session_id]
+                    logger.debug(f'Cleaned up stateless session: {session_id}')
+
+                # Return response directly
                 return Response(
                     content=json.dumps(response),
                     media_type='application/json',
@@ -199,6 +212,10 @@ class StreamableHTTPTransport:
                 )
             else:
                 logger.warning('No message handler set')
+                # Cleanup stateless session on error too
+                if is_stateless and session_id in self.sessions:
+                    del self.sessions[session_id]
+
                 return Response(
                     content=json.dumps({'error': 'No message handler configured'}),
                     status_code=500,
