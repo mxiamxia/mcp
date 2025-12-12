@@ -50,7 +50,7 @@ streamable_transport = StreamableHTTPTransport(endpoint='/mcp')
 
 # Message handler that integrates with FastMCP
 async def handle_mcp_message(message: JSONRPCMessage) -> dict:
-    """Handle JSON-RPC messages from MCP clients by calling MCP server directly.
+    """Handle JSON-RPC messages from MCP clients by dispatching to appropriate handlers.
 
     Args:
         message: The JSON-RPC message
@@ -61,9 +61,68 @@ async def handle_mcp_message(message: JSONRPCMessage) -> dict:
     try:
         logger.debug(f'Processing MCP message: {message}')
 
-        # Call the MCP server's request handler directly
-        # This is much faster than trying to simulate a full connection
-        response = await mcp._mcp_server._handle_request(message)
+        # Extract method and params from JSON-RPC message
+        method = message.get('method')
+        params = message.get('params', {})
+        msg_id = message.get('id')
+
+        # Dispatch based on method name
+        if method == 'tools/list':
+            result = await mcp._mcp_server.list_tools()
+            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
+
+        elif method == 'tools/call':
+            tool_name = params.get('name')
+            tool_args = params.get('arguments', {})
+            result = await mcp._mcp_server.call_tool(tool_name, tool_args)
+            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
+
+        elif method == 'resources/list':
+            result = await mcp._mcp_server.list_resources()
+            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
+
+        elif method == 'resources/read':
+            resource_uri = params.get('uri')
+            result = await mcp._mcp_server.read_resource(resource_uri)
+            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
+
+        elif method == 'prompts/list':
+            result = await mcp._mcp_server.list_prompts()
+            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
+
+        elif method == 'prompts/get':
+            prompt_name = params.get('name')
+            prompt_args = params.get('arguments')
+            result = await mcp._mcp_server.get_prompt(prompt_name, prompt_args)
+            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
+
+        elif method == 'initialize':
+            # Handle initialize request
+            init_options = mcp._mcp_server.create_initialization_options()
+            response = {
+                'jsonrpc': '2.0',
+                'id': msg_id,
+                'result': {
+                    'protocolVersion': '2024-11-05',
+                    'capabilities': mcp._mcp_server.get_capabilities().model_dump(),
+                    'serverInfo': {
+                        'name': init_options.server_name,
+                        'version': init_options.server_version,
+                    },
+                },
+            }
+
+        elif method == 'ping':
+            # Handle ping request
+            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': {}}
+
+        else:
+            logger.warning(f'Unknown method: {method}')
+            response = {
+                'jsonrpc': '2.0',
+                'id': msg_id,
+                'error': {'code': -32601, 'message': f'Method not found: {method}'},
+            }
 
         logger.debug(f'MCP response: {response}')
         return response
