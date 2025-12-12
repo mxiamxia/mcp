@@ -34,6 +34,7 @@ classifiers = [
 [project.scripts]
 "awslabs.cloudwatch-applicationsignals-mcp-server" = "awslabs.cloudwatch_applicationsignals_mcp_server.server:main"
 "awslabs.cloudwatch-applicationsignals-mcp-server-remote" = "awslabs.cloudwatch_applicationsignals_mcp_server.remote_server:main"
+"awslabs.cloudwatch-applicationsignals-mcp-server-streamable" = "awslabs.cloudwatch_applicationsignals_mcp_server.remote_server_streamable:main"
 
 [project.urls]
 Homepage = "https://awslabs.github.io/mcp/"
