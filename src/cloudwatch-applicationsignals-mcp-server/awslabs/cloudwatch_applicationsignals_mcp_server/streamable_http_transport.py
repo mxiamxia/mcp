@@ -156,15 +156,13 @@ class StreamableHTTPTransport:
         Returns:
             JSON response or StreamingResponse
         """
-        # Get session ID from header
+        # Get session ID from header, or auto-generate if not provided
         session_id = request.headers.get('Mcp-Session-Id')
 
         if not session_id:
-            return Response(
-                content=json.dumps({'error': 'Missing Mcp-Session-Id header'}),
-                status_code=400,
-                media_type='application/json',
-            )
+            # Auto-generate session ID for clients that don't provide it
+            session_id = str(uuid.uuid4())
+            logger.info(f'Auto-generated session ID for POST request: {session_id}')
 
         # Ensure session exists
         if session_id not in self.sessions:
