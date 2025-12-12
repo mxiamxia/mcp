@@ -16,7 +16,8 @@ The remote MCP server allows clients to connect over HTTP using Server-Sent Even
 1. AWS EC2 instance (Amazon Linux 2023, Amazon Linux 2, or Ubuntu recommended)
 2. Python 3.10 or higher
 3. AWS credentials (Access Key ID and Secret Access Key)
-4. Security group allowing inbound traffic on port 8000 (or your chosen port)
+4. Domain name pointed to your EC2 instance (required for HTTPS)
+5. Security group allowing inbound traffic on ports 80 and 443
 
 ## Installation on EC2
 
@@ -194,7 +195,177 @@ kill <PID>
 ./start_remote_server.sh
 ```
 
-## Complete EC2 Setup Example
+## HTTPS/SSL Setup (Required for Remote MCP)
+
+**IMPORTANT:** Remote MCP servers must use HTTPS. HTTP is only allowed for localhost connections.
+
+### Option 1: Using Nginx as Reverse Proxy with Let's Encrypt (Recommended)
+
+#### Step 1: Install Nginx
+
+**Amazon Linux 2023:**
+```bash
+sudo yum install nginx -y
+sudo systemctl enable nginx
+sudo systemctl start nginx
+```
+
+**Ubuntu:**
+```bash
+sudo apt install nginx -y
+sudo systemctl enable nginx
+sudo systemctl start nginx
+```
+
+#### Step 2: Install Certbot for Let's Encrypt SSL
+
+**Amazon Linux 2023:**
+```bash
+sudo yum install python3-certbot-nginx -y
+```
+
+**Ubuntu:**
+```bash
+sudo apt install certbot python3-certbot-nginx -y
+```
+
+#### Step 3: Obtain SSL Certificate
+
+Replace `your-domain.com` with your actual domain name:
+
+```bash
+sudo certbot --nginx -d your-domain.com
+```
+
+Follow the prompts to:
+- Enter your email address
+- Agree to terms of service
+- Choose whether to redirect HTTP to HTTPS (recommended: yes)
+
+#### Step 4: Configure Nginx
+
+Create Nginx configuration file:
+
+```bash
+sudo nano /etc/nginx/conf.d/mcp-server.conf
+```
+
+Add the following configuration:
+
+```nginx
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name your-domain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+# HTTPS server
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+
+    # SSL certificate paths (managed by Certbot)
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://127.0.0.1:8000/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Server info endpoint
+    location /info {
+        proxy_pass http://127.0.0.1:8000/info;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # SSE endpoint for MCP
+    location /sse {
+        proxy_pass http://127.0.0.1:8000/sse;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection '';
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # SSE specific settings
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+        chunked_transfer_encoding off;
+    }
+
+    # Messages endpoint
+    location /messages/ {
+        proxy_pass http://127.0.0.1:8000/messages/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+#### Step 5: Test and Reload Nginx
+
+```bash
+# Test configuration
+sudo nginx -t
+
+# Reload Nginx
+sudo systemctl reload nginx
+```
+
+#### Step 6: Start MCP Server (localhost only)
+
+Since Nginx is handling HTTPS, the MCP server should bind to localhost:
+
+```bash
+export MCP_HOST="127.0.0.1"  # Bind to localhost only
+export MCP_PORT=8000
+export AWS_REGION="us-east-1"
+
+# Start server
+python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
+
+# Or run in background:
+nohup python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server > server.log 2>&1 &
+```
+
+### Option 2: Using Self-Signed Certificate (Development Only)
+
+**Note:** Self-signed certificates are not recommended for production and may not work with all MCP clients.
+
+```bash
+# Generate self-signed certificate
+sudo mkdir -p /etc/ssl/mcp
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/mcp/server.key \
+  -out /etc/ssl/mcp/server.crt
+
+# Follow Nginx setup above with self-signed cert paths
+```
+
+## Complete EC2 Setup Example with HTTPS
 
 Here's a complete step-by-step example using EC2 instance at **18.208.249.167**:
 
@@ -204,9 +375,9 @@ Here's a complete step-by-step example using EC2 instance at **18.208.249.167**:
 # 1. SSH to your EC2 instance
 ssh -i your-key.pem ec2-user@18.208.249.167
 
-# 2. Install Python 3.11 (Amazon Linux 2023)
+# 2. Install Python 3.11 and Nginx (Amazon Linux 2023)
 sudo yum update -y
-sudo yum install python3.11 python3.11-pip git -y
+sudo yum install python3.11 python3.11-pip git nginx python3-certbot-nginx -y
 python3.11 --version  # Verify: should show 3.11.x
 
 # 3. Clone the repository
@@ -221,10 +392,67 @@ source venv/bin/activate
 pip install --upgrade pip
 pip install -e .
 
-# 5. Configure environment variables
+# 5. Set up SSL certificate with Let's Encrypt
+sudo systemctl enable nginx
+sudo systemctl start nginx
+sudo certbot --nginx -d mcp.your-domain.com
+# Follow prompts to configure SSL
+
+# 6. Create Nginx configuration
+sudo tee /etc/nginx/conf.d/mcp-server.conf > /dev/null <<'EOF'
+server {
+    listen 80;
+    server_name mcp.your-domain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name mcp.your-domain.com;
+
+    ssl_certificate /etc/letsencrypt/live/mcp.your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mcp.your-domain.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location /health {
+        proxy_pass http://127.0.0.1:8000/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    location /info {
+        proxy_pass http://127.0.0.1:8000/info;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    location /sse {
+        proxy_pass http://127.0.0.1:8000/sse;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+        chunked_transfer_encoding off;
+    }
+
+    location /messages/ {
+        proxy_pass http://127.0.0.1:8000/messages/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+}
+EOF
+
+# Test and reload Nginx
+sudo nginx -t
+sudo systemctl reload nginx
+
+# 7. Configure environment variables (bind to localhost since Nginx handles external connections)
 export AWS_REGION="us-east-1"
 export MCP_PORT=8000
-export MCP_HOST="0.0.0.0"
+export MCP_HOST="127.0.0.1"  # Localhost only - Nginx proxies external traffic
 
 # If using explicit AWS credentials:
 # export AWS_ACCESS_KEY_ID="your-access-key-id"  # pragma: allowlist secret
@@ -232,7 +460,7 @@ export MCP_HOST="0.0.0.0"
 
 # Or if using IAM role attached to EC2, no credentials needed!
 
-# 6. Start the server
+# 8. Start the server
 python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
 
 # Or run in background:
@@ -242,8 +470,8 @@ python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
 ### Test from Your Local Machine
 
 ```bash
-# Test health endpoint
-curl http://18.208.249.167:8000/health
+# Test health endpoint over HTTPS
+curl https://mcp.your-domain.com/health
 
 # Expected output:
 # {
@@ -255,36 +483,46 @@ curl http://18.208.249.167:8000/health
 # }
 
 # Test server info
-curl http://18.208.249.167:8000/info
+curl https://mcp.your-domain.com/info
 ```
 
 ### Configure Your MCP Client
 
-Update your Claude Desktop or other MCP client configuration:
+Update your Claude Desktop or other MCP client configuration with HTTPS URL:
 
 ```json
 {
   "mcpServers": {
     "cloudwatch-appsignals-remote": {
-      "url": "http://18.208.249.167:8000/sse",
+      "url": "https://mcp.your-domain.com/sse",
       "transport": "sse"
     }
   }
 }
 ```
 
+**Important:** Replace `mcp.your-domain.com` with your actual domain name.
+
 ## EC2 Security Group Configuration
 
-Configure your EC2 security group to allow inbound traffic:
+Configure your EC2 security group to allow HTTPS traffic:
 
 1. Go to EC2 Console → Security Groups
 2. Select your instance's security group
-3. Add inbound rule:
-   - Type: Custom TCP
-   - Port: 8000 (or your MCP_PORT)
-   - Source: 0.0.0.0/0 (for public access) or specific IP ranges
+3. Add inbound rules:
+   - **HTTPS:**
+     - Type: HTTPS
+     - Port: 443
+     - Source: 0.0.0.0/0 (for public access) or specific IP ranges
+   - **HTTP (for Let's Encrypt verification and redirect):**
+     - Type: HTTP
+     - Port: 80
+     - Source: 0.0.0.0/0
 
-**Security Note:** For production, restrict source IPs to known client addresses.
+**Security Note:**
+- Port 8000 should NOT be exposed publicly - MCP server binds to localhost only
+- Nginx handles external HTTPS connections and proxies to localhost:8000
+- For production, consider restricting port 443 source IPs to known client addresses
 
 ## Testing the Server
 
@@ -293,7 +531,7 @@ Configure your EC2 security group to allow inbound traffic:
 From your local machine or another server:
 
 ```bash
-curl http://your-ec2-public-ip:8000/health
+curl https://your-domain.com/health
 ```
 
 Expected response:
@@ -310,19 +548,19 @@ Expected response:
 ### 2. Server Info
 
 ```bash
-curl http://your-ec2-public-ip:8000/info
+curl https://your-domain.com/info
 ```
 
 ### 3. Test with Authentication (if MCP_API_KEY is set)
 
 ```bash
-curl -H "Authorization: Bearer your-secret-key" http://your-ec2-public-ip:8000/info  # pragma: allowlist secret
+curl -H "Authorization: Bearer your-secret-key" https://your-domain.com/info  # pragma: allowlist secret
 ```
 
 Or using X-API-Key header:
 
 ```bash
-curl -H "X-API-Key: your-secret-key" http://your-ec2-public-ip:8000/info  # pragma: allowlist secret
+curl -H "X-API-Key: your-secret-key" https://your-domain.com/info  # pragma: allowlist secret
 ```
 
 ## Client Configuration
