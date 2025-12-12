@@ -89,7 +89,9 @@ try:
 except Exception:
     temp_dir = tempfile.gettempdir()
     os.makedirs(temp_dir, exist_ok=True)
-    aws_cli_log_path = os.path.join(temp_dir, 'aws_cli.log')
+    # Use different log file for root vs regular user to avoid permission conflicts
+    user_suffix = 'root' if os.geteuid() == 0 else os.environ.get('USER', 'user')
+    aws_cli_log_path = os.path.join(temp_dir, f'aws_cli_{user_suffix}.log')
 
 # Add file handler for all logs
 logger.add(
