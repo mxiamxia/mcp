@@ -20,13 +20,11 @@ import uvicorn
 
 # Import the FastMCP instance from the existing server
 from .server import AWS_REGION, mcp
-from .streamable_http_transport import StreamableHTTPTransport
 from loguru import logger
-from mcp.types import JSONRPCMessage
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 
 # Get configuration from environment variables
@@ -44,100 +42,10 @@ SSL_CERTFILE = os.environ.get('SSL_CERTFILE', '/home/ec2-user/ssl/server.crt')
 # Configure logging
 log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO').upper()
 
-# Create Streamable HTTP transport
-streamable_transport = StreamableHTTPTransport(endpoint='/mcp')
 
-
-# Message handler that integrates with FastMCP
-async def handle_mcp_message(message: JSONRPCMessage) -> dict:
-    """Handle JSON-RPC messages from MCP clients by dispatching to appropriate handlers.
-
-    Args:
-        message: The JSON-RPC message
-
-    Returns:
-        The response message
-    """
-    try:
-        logger.debug(f'Processing MCP message: {message}')
-
-        # Extract method and params from JSON-RPC message
-        method = message.get('method')
-        params = message.get('params', {})
-        msg_id = message.get('id')
-
-        # Dispatch based on method name
-        if method == 'tools/list':
-            result = await mcp._mcp_server.list_tools()
-            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
-
-        elif method == 'tools/call':
-            tool_name = params.get('name')
-            tool_args = params.get('arguments', {})
-            result = await mcp._mcp_server.call_tool(tool_name, tool_args)
-            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
-
-        elif method == 'resources/list':
-            result = await mcp._mcp_server.list_resources()
-            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
-
-        elif method == 'resources/read':
-            resource_uri = params.get('uri')
-            result = await mcp._mcp_server.read_resource(resource_uri)
-            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
-
-        elif method == 'prompts/list':
-            result = await mcp._mcp_server.list_prompts()
-            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
-
-        elif method == 'prompts/get':
-            prompt_name = params.get('name')
-            prompt_args = params.get('arguments')
-            result = await mcp._mcp_server.get_prompt(prompt_name, prompt_args)
-            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': result.model_dump()}
-
-        elif method == 'initialize':
-            # Handle initialize request
-            init_options = mcp._mcp_server.create_initialization_options()
-            response = {
-                'jsonrpc': '2.0',
-                'id': msg_id,
-                'result': {
-                    'protocolVersion': '2024-11-05',
-                    'capabilities': mcp._mcp_server.get_capabilities().model_dump(),
-                    'serverInfo': {
-                        'name': init_options.server_name,
-                        'version': init_options.server_version,
-                    },
-                },
-            }
-
-        elif method == 'ping':
-            # Handle ping request
-            response = {'jsonrpc': '2.0', 'id': msg_id, 'result': {}}
-
-        else:
-            logger.warning(f'Unknown method: {method}')
-            response = {
-                'jsonrpc': '2.0',
-                'id': msg_id,
-                'error': {'code': -32601, 'message': f'Method not found: {method}'},
-            }
-
-        logger.debug(f'MCP response: {response}')
-        return response
-
-    except Exception as e:
-        logger.error(f'Error handling MCP message: {e}', exc_info=True)
-        return {
-            'jsonrpc': '2.0',
-            'id': message.get('id') if isinstance(message, dict) else None,
-            'error': {'code': -32603, 'message': f'Internal error: {str(e)}'},
-        }
-
-
-# Set the message handler
-streamable_transport.set_message_handler(handle_mcp_message)
+# Get FastMCP's built-in SSE app
+# FastMCP automatically handles all MCP protocol messages
+sse_app = mcp.sse_app()
 
 
 async def simple_auth_middleware(request: Request, call_next):
@@ -198,36 +106,26 @@ async def server_info(request: Request):
             'name': 'cloudwatch-applicationsignals-mcp-server',
             'description': 'AWS CloudWatch Application Signals MCP Server',
             'version': '0.1.19',
-            'transport': 'streamable-http',
+            'transport': 'sse',
             'region': AWS_REGION,
-            'endpoints': {'health': '/health', 'info': '/info', 'mcp': '/mcp'},
+            'endpoints': {
+                'health': '/health',
+                'info': '/info',
+                'sse': '/sse',
+                'messages': '/messages',
+            },
             'authentication': 'enabled' if MCP_API_KEY else 'disabled',
         }
     )
 
 
-async def handle_mcp_endpoint(request: Request):
-    """Handle MCP endpoint - supports GET, POST, DELETE."""
-    if request.method == 'GET':
-        return await streamable_transport.handle_get(request)
-    elif request.method == 'POST':
-        return await streamable_transport.handle_post(request)
-    elif request.method == 'DELETE':
-        return await streamable_transport.handle_delete(request)
-    else:
-        return JSONResponse(
-            {'error': 'Method not allowed'},
-            status_code=405,
-        )
-
-
-# Create Starlette application
+# Create Starlette application with FastMCP's SSE app mounted
 app = Starlette(
     debug=log_level == 'DEBUG',
     routes=[
         Route('/health', endpoint=health_check, methods=['GET']),
         Route('/info', endpoint=server_info, methods=['GET']),
-        Route('/mcp', endpoint=handle_mcp_endpoint, methods=['GET', 'POST', 'DELETE']),
+        Mount('/', app=sse_app),  # Mount FastMCP's SSE app at root (handles /sse and /messages)
     ],
 )
 
@@ -245,11 +143,11 @@ def main():
     ssl_enabled = not DISABLE_SSL and os.path.exists(SSL_KEYFILE) and os.path.exists(SSL_CERTFILE)
     protocol = 'https' if ssl_enabled else 'http'
 
-    logger.info('Starting CloudWatch Application Signals MCP Remote Server')
+    logger.info('Starting CloudWatch Application Signals MCP Remote Server (SSE)')
     logger.info(f'Server: {HOST}:{PORT}')
     logger.info(f'Region: {AWS_REGION}')
     logger.info(f'Protocol: {protocol.upper()}')
-    logger.info('Transport: Streamable HTTP')
+    logger.info('Transport: SSE (FastMCP built-in)')
     logger.info(f'Authentication: {"enabled" if MCP_API_KEY else "disabled (pass-through)"}')
 
     if ssl_enabled:
@@ -270,7 +168,8 @@ def main():
     logger.info('Endpoints:')
     logger.info(f'  Health Check: {protocol}://{HOST}:{PORT}/health')
     logger.info(f'  Server Info: {protocol}://{HOST}:{PORT}/info')
-    logger.info(f'  MCP Endpoint: {protocol}://{HOST}:{PORT}/mcp')
+    logger.info(f'  SSE Stream: {protocol}://{HOST}:{PORT}/sse')
+    logger.info(f'  Messages: {protocol}://{HOST}:{PORT}/messages/{{sessionId}}')
 
     try:
         if ssl_enabled:
