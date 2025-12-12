@@ -55,48 +55,50 @@ def _initialize_aws_clients():
     if synthetics_endpoint:
         logger.debug(f'Using Synthetics endpoint override: {synthetics_endpoint}')
 
-    # Check for AWS_PROFILE environment variable
-    if aws_profile := os.environ.get('AWS_PROFILE'):
+    # Check for explicit AWS credentials in environment variables
+    aws_access_key_id = os.environ.get('AWS_ACCESS_KEY_ID')
+    aws_secret_access_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    aws_session_token = os.environ.get('AWS_SESSION_TOKEN')
+    aws_profile = os.environ.get('AWS_PROFILE')
+
+    # Initialize session based on available credentials
+    if aws_access_key_id and aws_secret_access_key:
+        # Use explicit credentials from environment variables
+        logger.debug(
+            'Using AWS credentials from environment variables (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY)'
+        )
+        session = boto3.Session(
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            aws_session_token=aws_session_token,
+            region_name=AWS_REGION,
+        )
+    elif aws_profile:
+        # Use AWS profile
         logger.debug(f'Using AWS profile: {aws_profile}')
         session = boto3.Session(profile_name=aws_profile, region_name=AWS_REGION)
-        logs = session.client('logs', config=config, endpoint_url=logs_endpoint)
-        applicationsignals = session.client(
-            'application-signals',
-            region_name=AWS_REGION,
-            config=config,
-            endpoint_url=applicationsignals_endpoint,
-        )
-        cloudwatch = session.client('cloudwatch', config=config, endpoint_url=cloudwatch_endpoint)
-        xray = session.client('xray', config=config, endpoint_url=xray_endpoint)
-        synthetics = session.client('synthetics', config=config, endpoint_url=synthetics_endpoint)
-        s3 = session.client('s3', config=config)
-        iam = session.client('iam', config=config)
-        lambda_client = session.client('lambda', config=config)
-        sts = session.client('sts', config=config)
     else:
-        logs = boto3.client(
-            'logs', region_name=AWS_REGION, config=config, endpoint_url=logs_endpoint
+        # Use default credential chain (IAM role, instance profile, etc.)
+        logger.debug(
+            'Using default AWS credential chain (IAM role, instance profile, or default profile)'
         )
-        applicationsignals = boto3.client(
-            'application-signals',
-            region_name=AWS_REGION,
-            config=config,
-            endpoint_url=applicationsignals_endpoint,
-        )
-        cloudwatch = boto3.client(
-            'cloudwatch', region_name=AWS_REGION, config=config, endpoint_url=cloudwatch_endpoint
-        )
-        xray = boto3.client(
-            'xray', region_name=AWS_REGION, config=config, endpoint_url=xray_endpoint
-        )
-        # Additional clients for canary functionality
-        synthetics = boto3.client(
-            'synthetics', region_name=AWS_REGION, config=config, endpoint_url=synthetics_endpoint
-        )
-        s3 = boto3.client('s3', region_name=AWS_REGION, config=config)
-        iam = boto3.client('iam', region_name=AWS_REGION, config=config)
-        lambda_client = boto3.client('lambda', region_name=AWS_REGION, config=config)
-        sts = boto3.client('sts', region_name=AWS_REGION, config=config)
+        session = boto3.Session(region_name=AWS_REGION)
+
+    # Create clients from session
+    logs = session.client('logs', config=config, endpoint_url=logs_endpoint)
+    applicationsignals = session.client(
+        'application-signals',
+        region_name=AWS_REGION,
+        config=config,
+        endpoint_url=applicationsignals_endpoint,
+    )
+    cloudwatch = session.client('cloudwatch', config=config, endpoint_url=cloudwatch_endpoint)
+    xray = session.client('xray', config=config, endpoint_url=xray_endpoint)
+    synthetics = session.client('synthetics', config=config, endpoint_url=synthetics_endpoint)
+    s3 = session.client('s3', config=config)
+    iam = session.client('iam', config=config)
+    lambda_client = session.client('lambda', config=config)
+    sts = session.client('sts', config=config)
 
     logger.debug('AWS clients initialized successfully')
     return logs, applicationsignals, cloudwatch, xray, synthetics, s3, iam, lambda_client, sts
