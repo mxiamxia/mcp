@@ -453,7 +453,6 @@ EC2_DNS="ec2-18-208-249-167.compute-1.amazonaws.com" ./generate-ssl-cert.sh
 
 # 6. Configure environment variables
 export AWS_REGION="us-east-1"
-export MCP_PORT=8443  # Use 8443 to avoid needing sudo (or use 443 with sudo)
 export MCP_HOST="0.0.0.0"
 export SSL_KEYFILE="$HOME/ssl/server.key"
 export SSL_CERTFILE="$HOME/ssl/server.crt"
@@ -464,21 +463,21 @@ export SSL_CERTFILE="$HOME/ssl/server.crt"
 
 # Or if using IAM role attached to EC2, no credentials needed!
 
-# 7. Start the server
-python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
+# 7. Start the server on port 443 (standard HTTPS, requires sudo)
+sudo -E python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
+
+# The -E flag preserves environment variables (AWS credentials, SSL paths, etc.)
+# Default port is 443 (no need to set MCP_PORT)
 
 # Or run in background:
-# nohup python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server > server.log 2>&1 &
-
-# If using port 443 (requires sudo):
-# sudo -E python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server
+# nohup sudo -E python -m awslabs.cloudwatch_applicationsignals_mcp_server.remote_server > server.log 2>&1 &
 ```
 
 ### Test from Your Local Machine
 
 ```bash
 # Test health endpoint over HTTPS (use -k to accept self-signed cert)
-curl -k https://ec2-18-208-249-167.compute-1.amazonaws.com:8443/health
+curl -k https://ec2-18-208-249-167.compute-1.amazonaws.com/health
 
 # Expected output:
 # {
@@ -490,7 +489,7 @@ curl -k https://ec2-18-208-249-167.compute-1.amazonaws.com:8443/health
 # }
 
 # Test server info
-curl -k https://ec2-18-208-249-167.compute-1.amazonaws.com:8443/info
+curl -k https://ec2-18-208-249-167.compute-1.amazonaws.com/info
 ```
 
 ### Configure Your MCP Client
@@ -501,7 +500,7 @@ Update your Claude Desktop or other MCP client configuration:
 {
   "mcpServers": {
     "cloudwatch-appsignals-remote": {
-      "url": "https://ec2-18-208-249-167.compute-1.amazonaws.com:8443/sse",
+      "url": "https://ec2-18-208-249-167.compute-1.amazonaws.com/sse",
       "transport": "sse"
     }
   }
@@ -515,24 +514,18 @@ Update your Claude Desktop or other MCP client configuration:
 
 ## EC2 Security Group Configuration
 
-Configure your EC2 security group to allow HTTPS traffic:
+Configure your EC2 security group to allow HTTPS traffic on port 443:
 
 1. Go to EC2 Console → Security Groups
 2. Select your instance's security group
 3. Add inbound rule:
-   - **For port 8443 (recommended):**
-     - Type: Custom TCP
-     - Port: 8443
-     - Source: 0.0.0.0/0 (for public access) or specific IP ranges
-
-   - **For port 443 (standard HTTPS):**
-     - Type: HTTPS
-     - Port: 443
-     - Source: 0.0.0.0/0 (for public access) or specific IP ranges
+   - Type: HTTPS
+   - Port: 443
+   - Source: 0.0.0.0/0 (for public access) or specific IP ranges
 
 **Security Notes:**
-- Port 8443 doesn't require sudo to run the server
-- Port 443 requires running the server with sudo
+- Port 443 is the standard HTTPS port
+- Server must be run with sudo to bind to port 443
 - For production, restrict source IPs to known client addresses
 
 ## Testing the Server
