@@ -99,7 +99,12 @@ class StreamableHTTPTransport:
         async def event_generator():
             """Generate Server-Sent Events."""
             try:
-                # Send session ID in the first event
+                # Send endpoint event for backward compatibility with older MCP clients
+                # This tells clients where to send POST requests
+                yield 'event: endpoint\n'
+                yield f'data: {json.dumps({"endpoint": self.endpoint})}\n\n'
+
+                # Send session ID event
                 yield 'event: session\n'
                 yield f'data: {json.dumps({"sessionId": session_id})}\n\n'
 
