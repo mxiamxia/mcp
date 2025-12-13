@@ -99,10 +99,9 @@ class StreamableHTTPTransport:
         async def event_generator():
             """Generate Server-Sent Events."""
             try:
-                # For Streamable HTTP, we only send the session event
-                # The client already knows the endpoint URL from the initial GET request
-                yield 'event: session\n'
-                yield f'data: {json.dumps({"sessionId": session_id})}\n\n'
+                # For Streamable HTTP, session ID is ONLY in the response header
+                # Per MCP spec 2025-03-26: No session or endpoint events are sent
+                # GET streams are for server-initiated requests/notifications only
 
                 # Stream messages from the queue
                 while True:

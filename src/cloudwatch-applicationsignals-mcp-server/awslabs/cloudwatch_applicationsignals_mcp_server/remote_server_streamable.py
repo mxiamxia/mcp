@@ -21,6 +21,7 @@ import uvicorn
 # Import the FastMCP instance from the existing server
 from .server import AWS_REGION, mcp
 from loguru import logger
+from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -43,19 +44,14 @@ SSL_CERTFILE = os.environ.get('SSL_CERTFILE', '/home/ec2-user/ssl/server.crt')
 log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO').upper()
 
 
-# Get FastMCP's built-in SSE app
-# FastMCP automatically handles all MCP protocol messages
-sse_app = mcp.sse_app()
-
-
 async def simple_auth_middleware(request: Request, call_next):
     """Simple authentication middleware that accepts any API key.
 
     This is a pass-through authentication for development/testing.
     In production, implement proper authentication logic here.
     """
-    # Skip auth for health check endpoint
-    if request.url.path == '/health':
+    # Skip auth for health check and info endpoints
+    if request.url.path in ['/health', '/info']:
         return await call_next(request)
 
     # If MCP_API_KEY is set, check for it (basic validation)
@@ -106,31 +102,64 @@ async def server_info(request: Request):
             'name': 'cloudwatch-applicationsignals-mcp-server',
             'description': 'AWS CloudWatch Application Signals MCP Server',
             'version': '0.1.19',
-            'transport': 'sse',
+            'transport': 'streamable-http',
             'region': AWS_REGION,
             'endpoints': {
                 'health': '/health',
                 'info': '/info',
-                'sse': '/sse',
-                'messages': '/messages',
+                'mcp': '/mcp',
             },
             'authentication': 'enabled' if MCP_API_KEY else 'disabled',
         }
     )
 
 
-# Create Starlette application with FastMCP's SSE app mounted
-app = Starlette(
-    debug=log_level == 'DEBUG',
-    routes=[
-        Route('/health', endpoint=health_check, methods=['GET']),
-        Route('/info', endpoint=server_info, methods=['GET']),
-        Mount('/', app=sse_app),  # Mount FastMCP's SSE app at root (handles /sse and /messages)
-    ],
-)
+def create_app() -> Starlette:
+    """Create the Starlette application with MCP SSE transport.
 
-# Add authentication middleware
-app.middleware('http')(simple_auth_middleware)
+    This uses FastMCP's internal SSE transport which implements the
+    MCP Streamable HTTP protocol correctly.
+    """
+    # Create SSE transport - use /mcp as the base path for messages
+    sse = SseServerTransport('/messages/')
+
+    async def handle_sse(request: Request) -> None:
+        """Handle SSE connections for MCP protocol.
+
+        This establishes the bidirectional connection between client and server
+        using Server-Sent Events for server-to-client messages and POST for
+        client-to-server messages.
+        """
+        logger.info(f'New SSE connection from {request.client}')
+        async with sse.connect_sse(
+            request.scope,
+            request.receive,
+            request._send,  # type: ignore[reportPrivateUsage]
+        ) as streams:
+            # Run the MCP server with the established streams
+            await mcp._mcp_server.run(
+                streams[0],  # read stream
+                streams[1],  # write stream
+                mcp._mcp_server.create_initialization_options(),
+            )
+
+    # Create Starlette app with routes
+    app = Starlette(
+        debug=log_level == 'DEBUG',
+        routes=[
+            Route('/health', endpoint=health_check, methods=['GET']),
+            Route('/info', endpoint=server_info, methods=['GET']),
+            # SSE endpoint for establishing the connection
+            Route('/mcp', endpoint=handle_sse, methods=['GET']),
+            # Message endpoint for client-to-server messages
+            Mount('/messages/', app=sse.handle_post_message),
+        ],
+    )
+
+    # Add authentication middleware
+    app.middleware('http')(simple_auth_middleware)
+
+    return app
 
 
 def main():
@@ -143,11 +172,11 @@ def main():
     ssl_enabled = not DISABLE_SSL and os.path.exists(SSL_KEYFILE) and os.path.exists(SSL_CERTFILE)
     protocol = 'https' if ssl_enabled else 'http'
 
-    logger.info('Starting CloudWatch Application Signals MCP Remote Server (SSE)')
+    logger.info('Starting CloudWatch Application Signals MCP Remote Server (Streamable HTTP)')
     logger.info(f'Server: {HOST}:{PORT}')
     logger.info(f'Region: {AWS_REGION}')
     logger.info(f'Protocol: {protocol.upper()}')
-    logger.info('Transport: SSE (FastMCP built-in)')
+    logger.info('Transport: Streamable HTTP (MCP SSE)')
     logger.info(f'Authentication: {"enabled" if MCP_API_KEY else "disabled (pass-through)"}')
 
     if ssl_enabled:
@@ -168,8 +197,11 @@ def main():
     logger.info('Endpoints:')
     logger.info(f'  Health Check: {protocol}://{HOST}:{PORT}/health')
     logger.info(f'  Server Info: {protocol}://{HOST}:{PORT}/info')
-    logger.info(f'  SSE Stream: {protocol}://{HOST}:{PORT}/sse')
-    logger.info(f'  Messages: {protocol}://{HOST}:{PORT}/messages/{{sessionId}}')
+    logger.info(f'  MCP SSE Endpoint: {protocol}://{HOST}:{PORT}/mcp')
+    logger.info(f'  MCP Messages: {protocol}://{HOST}:{PORT}/messages/{{sessionId}}')
+
+    # Create the app
+    app = create_app()
 
     try:
         if ssl_enabled:
