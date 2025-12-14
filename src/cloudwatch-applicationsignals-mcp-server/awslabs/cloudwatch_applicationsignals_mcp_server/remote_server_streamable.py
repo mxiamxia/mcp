@@ -50,15 +50,11 @@ async def simple_auth_middleware(request: Request, call_next):
     This is a pass-through authentication for development/testing.
     In production, implement proper authentication logic here.
     """
-    # Debug logging: print request details
-    logger.info(f'Request URL: {request.url}')
-    logger.info(f'Request Path: {request.url.path}')
-    logger.info(f'Request Method: {request.method}')
-    logger.info(f'Request Headers: {dict(request.headers)}')
-    logger.info(f'Request Client: {request.client}')
-
-    # Skip auth for health check and info endpoints
-    if request.url.path in ['/health', '/info']:
+    # Skip auth for health check, info, and MCP endpoints
+    # CloudFront may strip custom headers, so we allow MCP endpoints without auth
+    if request.url.path in ['/health', '/info', '/mcp'] or request.url.path.startswith(
+        '/messages/'
+    ):
         return await call_next(request)
 
     # If MCP_API_KEY is set, check for it (basic validation)
@@ -66,15 +62,23 @@ async def simple_auth_middleware(request: Request, call_next):
         auth_header = request.headers.get('Authorization', '')
         api_key = request.headers.get('X-API-Key', '')
 
-        # TESTING: Always pass authentication for debugging
-        # Just log what we received
+        # Accept either Bearer token or X-API-Key header
         if not (auth_header.startswith('Bearer ') or api_key):
-            logger.warning(
-                'Request missing API key or Authorization header - ALLOWING FOR TESTING'
+            logger.warning('Request missing API key or Authorization header')
+            return JSONResponse(
+                {
+                    'error': 'Missing authentication. Provide Authorization: Bearer <token> or X-API-Key header'
+                },
+                status_code=401,
             )
-        else:
-            provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
-            logger.info(f'Request authenticated with key: {provided_key[:8]}...')
+
+        # For this simple implementation, any non-empty key is accepted
+        provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
+        if not provided_key:
+            logger.warning('Empty API key provided')
+            return JSONResponse({'error': 'Invalid authentication credentials'}, status_code=401)
+
+        logger.debug(f'Request authenticated with key: {provided_key[:8]}...')
     else:
         logger.debug('No MCP_API_KEY set - authentication is disabled')
 
