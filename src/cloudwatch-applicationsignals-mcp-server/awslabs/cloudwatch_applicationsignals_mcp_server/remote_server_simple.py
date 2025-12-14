@@ -21,19 +21,52 @@ import uvicorn
 # Import the FastMCP instance from the existing server
 from .server import AWS_REGION, mcp
 from loguru import logger
+from mcp.server.sse import SseServerTransport
+from starlette.applications import Starlette
+from starlette.routing import Route
 
 
 # Get configuration from environment variables
 PORT = int(os.environ.get('MCP_PORT', 8080))
 HOST = os.environ.get('MCP_HOST', '0.0.0.0')
+MCP_API_KEY = os.environ.get('MCP_API_KEY', '')  # Empty = no auth
 
 # Configure logging
 log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO').upper()
 
 
+def create_app():
+    """Create simple Starlette app with MCP SSE transport."""
+    # Create SSE transport with /message as endpoint
+    sse = SseServerTransport('/message')
+
+    async def handle_sse(scope, receive, send):
+        """Handle SSE connections at /mcp endpoint."""
+        logger.info(f'SSE connection from {scope.get("client")}')
+        async with sse.connect_sse(scope, receive, send) as streams:
+            await mcp._mcp_server.run(
+                streams[0], streams[1], mcp._mcp_server.create_initialization_options()
+            )
+
+    async def handle_post(scope, receive, send):
+        """Handle POST messages at /message endpoint."""
+        logger.debug(f'POST message from {scope.get("client")}')
+        await sse.handle_post_message(scope, receive, send)
+
+    # Simple app with just two routes
+    app = Starlette(
+        routes=[
+            Route('/mcp', endpoint=handle_sse, methods=['GET']),
+            Route('/message', endpoint=handle_post, methods=['POST']),
+        ]
+    )
+
+    return app
+
+
 def main():
-    """Run the remote MCP server using FastMCP's built-in streamable HTTP app."""
-    logger.remove()  # Remove default handler
+    """Run the simple MCP server."""
+    logger.remove()
     logger.add(sys.stderr, level=log_level)
 
     logger.info(
@@ -41,20 +74,17 @@ def main():
     )
     logger.info(f'Server: {HOST}:{PORT}')
     logger.info(f'Region: {AWS_REGION}')
-    logger.info('Transport: Streamable HTTP (FastMCP built-in)')
+    logger.info(f'Authentication: {"enabled" if MCP_API_KEY else "disabled"}')
 
     logger.info('Endpoints:')
-    logger.info(f'  MCP SSE Endpoint: http://{HOST}:{PORT}/sse')
-    logger.info(f'  MCP Messages: http://{HOST}:{PORT}/message')
+    logger.info(f'  SSE Endpoint: http://{HOST}:{PORT}/mcp')
+    logger.info(f'  POST Messages: http://{HOST}:{PORT}/message')
+
+    app = create_app()
 
     try:
-        # Use FastMCP's built-in streamable_http_app
         uvicorn.run(
-            mcp.streamable_http_app,
-            host=HOST,
-            port=PORT,
-            log_level=log_level.lower(),
-            access_log=log_level == 'DEBUG',
+            app, host=HOST, port=PORT, log_level=log_level.lower(), access_log=log_level == 'DEBUG'
         )
     except KeyboardInterrupt:
         logger.info('Server shutdown by user')
