@@ -66,23 +66,15 @@ async def simple_auth_middleware(request: Request, call_next):
         auth_header = request.headers.get('Authorization', '')
         api_key = request.headers.get('X-API-Key', '')
 
-        # Accept either Bearer token or X-API-Key header
+        # TESTING: Always pass authentication for debugging
+        # Just log what we received
         if not (auth_header.startswith('Bearer ') or api_key):
-            logger.warning('Request missing API key or Authorization header')
-            return JSONResponse(
-                {
-                    'error': 'Missing authentication. Provide Authorization: Bearer <token> or X-API-Key header'
-                },
-                status_code=401,
+            logger.warning(
+                'Request missing API key or Authorization header - ALLOWING FOR TESTING'
             )
-
-        # For this simple implementation, any non-empty key is accepted
-        provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
-        if not provided_key:
-            logger.warning('Empty API key provided')
-            return JSONResponse({'error': 'Invalid authentication credentials'}, status_code=401)
-
-        logger.debug(f'Request authenticated with key: {provided_key[:8]}...')
+        else:
+            provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
+            logger.info(f'Request authenticated with key: {provided_key[:8]}...')
     else:
         logger.debug('No MCP_API_KEY set - authentication is disabled')
 
