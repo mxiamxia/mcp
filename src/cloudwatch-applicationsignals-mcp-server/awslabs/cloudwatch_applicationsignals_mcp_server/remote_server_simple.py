@@ -23,6 +23,7 @@ from .server import AWS_REGION, mcp
 from loguru import logger
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.routing import Route
 
 
@@ -40,18 +41,18 @@ def create_app():
     # Create SSE transport with /message as endpoint
     sse = SseServerTransport('/message')
 
-    async def handle_sse(scope, receive, send):
+    async def handle_sse(request: Request):
         """Handle SSE connections at /mcp endpoint."""
-        logger.info(f'SSE connection from {scope.get("client")}')
-        async with sse.connect_sse(scope, receive, send) as streams:
+        logger.info(f'SSE connection from {request.client}')
+        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:  # type: ignore
             await mcp._mcp_server.run(
                 streams[0], streams[1], mcp._mcp_server.create_initialization_options()
             )
 
-    async def handle_post(scope, receive, send):
+    async def handle_post(request: Request):
         """Handle POST messages at /message endpoint."""
-        logger.debug(f'POST message from {scope.get("client")}')
-        await sse.handle_post_message(scope, receive, send)
+        logger.debug(f'POST message from {request.client}')
+        await sse.handle_post_message(request.scope, request.receive, request._send)  # type: ignore
 
     # Simple app with just two routes
     app = Starlette(
