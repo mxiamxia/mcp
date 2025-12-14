@@ -52,9 +52,7 @@ async def simple_auth_middleware(request: Request, call_next):
     """
     # Skip auth for health check, info, and MCP endpoints
     # CloudFront may strip custom headers, so we allow MCP endpoints without auth
-    if request.url.path in ['/health', '/info', '/mcp'] or request.url.path.startswith(
-        '/messages/'
-    ):
+    if request.url.path in ['/health', '/info'] or request.url.path.startswith('/messages/'):
         return await call_next(request)
 
     # If MCP_API_KEY is set, check for it (basic validation)
