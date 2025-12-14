@@ -50,6 +50,13 @@ async def simple_auth_middleware(request: Request, call_next):
     This is a pass-through authentication for development/testing.
     In production, implement proper authentication logic here.
     """
+    # Debug logging: print request details
+    logger.info(f'Request URL: {request.url}')
+    logger.info(f'Request Path: {request.url.path}')
+    logger.info(f'Request Method: {request.method}')
+    logger.info(f'Request Headers: {dict(request.headers)}')
+    logger.info(f'Request Client: {request.client}')
+
     # Skip auth for health check and info endpoints
     if request.url.path in ['/health', '/info']:
         return await call_next(request)
