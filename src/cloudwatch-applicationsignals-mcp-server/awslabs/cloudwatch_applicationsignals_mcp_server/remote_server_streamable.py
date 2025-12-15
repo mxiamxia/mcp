@@ -57,9 +57,13 @@ async def simple_auth_middleware(request: Request, call_next):
     logger.info(f'Request Headers: {dict(request.headers)}')
     logger.info(f'Request Client: {request.client}')
 
-    # Skip auth for health check, info, and MCP endpoints
+    # Skip auth for health check, info, well-known, and MCP endpoints
     # CloudFront may strip custom headers, so we allow MCP endpoints without auth
-    if request.url.path in ['/health', '/info'] or request.url.path.startswith('/messages/'):
+    if request.url.path in [
+        '/health',
+        '/info',
+        '/.well-known/oauth-authorization-server',
+    ] or request.url.path.startswith('/messages/'):
         return await call_next(request)
 
     # If MCP_API_KEY is set, check for it (basic validation)
@@ -122,6 +126,31 @@ async def server_info(request: Request):
     )
 
 
+async def oauth_metadata(request: Request):
+    """OAuth 2.0 Authorization Server Metadata endpoint.
+
+    Returns metadata indicating that this server does not require OAuth authorization.
+    This satisfies MCP clients that check for authorization capabilities without
+    actually implementing OAuth.
+    """
+    # Get the base URL from the request
+    base_url = f'{request.url.scheme}://{request.url.netloc}'
+
+    return JSONResponse(
+        {
+            'issuer': base_url,
+            'authorization_endpoint': f'{base_url}/authorize',
+            'token_endpoint': f'{base_url}/token',
+            'grant_types_supported': ['authorization_code', 'client_credentials'],
+            'response_types_supported': ['code'],
+            'token_endpoint_auth_methods_supported': ['none'],
+            'code_challenge_methods_supported': ['S256'],
+            # Indicate that authorization is optional/not required
+            'authorization_required': False,
+        }
+    )
+
+
 def create_app() -> Starlette:
     """Create the Starlette application with MCP SSE transport.
 
@@ -157,6 +186,10 @@ def create_app() -> Starlette:
         routes=[
             Route('/health', endpoint=health_check, methods=['GET']),
             Route('/info', endpoint=server_info, methods=['GET']),
+            # OAuth 2.0 Authorization Server Metadata (RFC 8414)
+            Route(
+                '/.well-known/oauth-authorization-server', endpoint=oauth_metadata, methods=['GET']
+            ),
             # SSE endpoint for establishing the connection
             Route('/mcp', endpoint=handle_sse, methods=['GET', 'POST']),
             # Message endpoint for client-to-server messages
