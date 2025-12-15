@@ -158,7 +158,7 @@ def create_app() -> Starlette:
             Route('/health', endpoint=health_check, methods=['GET']),
             Route('/info', endpoint=server_info, methods=['GET']),
             # SSE endpoint for establishing the connection
-            Route('/mcp', endpoint=handle_sse, methods=['GET']),
+            Route('/mcp', endpoint=handle_sse, methods=['GET', 'POST']),
             # Message endpoint for client-to-server messages
             Mount('/messages/', app=sse.handle_post_message),
         ],
