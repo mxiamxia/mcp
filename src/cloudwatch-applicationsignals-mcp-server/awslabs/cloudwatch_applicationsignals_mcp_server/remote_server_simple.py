@@ -57,7 +57,7 @@ def create_app():
     # Simple app with just two routes
     app = Starlette(
         routes=[
-            Route('/mcp', endpoint=handle_sse, methods=['GET']),
+            Route('/mcp', endpoint=handle_sse, methods=['GET', 'POST']),
             Route('/message', endpoint=handle_post, methods=['POST']),
         ]
     )
