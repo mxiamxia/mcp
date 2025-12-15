@@ -168,17 +168,22 @@ def create_app() -> Starlette:
         client-to-server messages.
         """
         logger.info(f'New SSE connection from {request.client}')
-        async with sse.connect_sse(
-            request.scope,
-            request.receive,
-            request._send,  # type: ignore[reportPrivateUsage]
-        ) as streams:
-            # Run the MCP server with the established streams
-            await mcp._mcp_server.run(
-                streams[0],  # read stream
-                streams[1],  # write stream
-                mcp._mcp_server.create_initialization_options(),
-            )
+        try:
+            async with sse.connect_sse(
+                request.scope,
+                request.receive,
+                request._send,  # type: ignore[reportPrivateUsage]
+            ) as streams:
+                logger.info('SSE streams established, starting MCP server')
+                # Run the MCP server with the established streams
+                await mcp._mcp_server.run(
+                    streams[0],  # read stream
+                    streams[1],  # write stream
+                    mcp._mcp_server.create_initialization_options(),
+                )
+                logger.info('MCP server run completed')
+        except Exception as e:
+            logger.error(f'Error in SSE handler: {e}', exc_info=True)
 
     # Create Starlette app with routes
     app = Starlette(
