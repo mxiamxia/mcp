@@ -24,7 +24,6 @@ from loguru import logger
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
 
 
 # Get configuration from environment variables
@@ -43,56 +42,7 @@ SSL_CERTFILE = os.environ.get('SSL_CERTFILE', '/home/ec2-user/ssl/server.crt')
 log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO').upper()
 
 
-async def simple_auth_middleware(request: Request, call_next):
-    """Simple authentication middleware that accepts any API key.
-
-    This is a pass-through authentication for development/testing.
-    In production, implement proper authentication logic here.
-    """
-    # Debug logging: print request details
-    logger.info(f'Request URL: {request.url}')
-    logger.info(f'Request Path: {request.url.path}')
-    logger.info(f'Request Method: {request.method}')
-    logger.info(f'Request Headers: {dict(request.headers)}')
-    logger.info(f'Request Client: {request.client}')
-
-    # Skip auth for health check, info, well-known, and MCP endpoints
-    # CloudFront may strip custom headers, so we allow MCP endpoints without auth
-    if request.url.path in [
-        '/health',
-        '/info',
-        '/.well-known/oauth-authorization-server',
-    ] or request.url.path.startswith(('/messages/', '/mcp')):
-        return await call_next(request)
-
-    # If MCP_API_KEY is set, check for it (basic validation)
-    if MCP_API_KEY:
-        auth_header = request.headers.get('Authorization', '')
-        api_key = request.headers.get('X-API-Key', '')
-
-        # Accept either Bearer token or X-API-Key header
-        if not (auth_header.startswith('Bearer ') or api_key):
-            logger.warning('Request missing API key or Authorization header')
-            return JSONResponse(
-                {
-                    'error': 'Missing authentication. Provide Authorization: Bearer <token> or X-API-Key header'
-                },
-                status_code=401,
-            )
-
-        # For this simple implementation, any non-empty key is accepted
-        provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
-        if not provided_key:
-            logger.warning('Empty API key provided')
-            return JSONResponse({'error': 'Invalid authentication credentials'}, status_code=401)
-
-        logger.debug(f'Request authenticated with key: {provided_key[:8]}...')
-    else:
-        logger.debug('No MCP_API_KEY set - authentication is disabled')
-
-    return await call_next(request)
-
-
+# Custom route handlers
 async def health_check(request: Request):
     """Health check endpoint for load balancers and monitoring."""
     return JSONResponse(
@@ -151,31 +101,52 @@ async def oauth_metadata(request: Request):
 
 
 def create_app() -> Starlette:
-    """Create the Starlette application with MCP SSE transport.
+    """Create the Starlette application with MCP Streamable HTTP transport.
 
-    This uses FastMCP's built-in SSE app which supports both stateless
-    and stateful modes.
+    This creates an app with a unified /mcp endpoint that handles both GET (SSE)
+    and POST (stateless requests) according to the MCP Streamable HTTP spec.
     """
-    # Get FastMCP's built-in SSE app (this is an ASGI app)
-    sse_app = mcp.sse_app()
+    from mcp.server.sse import SseServerTransport
+    from starlette.routing import Route
 
-    # Create Starlette app with routes
+    # Create SSE transport
+    sse = SseServerTransport('/messages')
+
+    async def handle_mcp_get(request: Request):
+        """Handle GET /mcp - establish SSE stream."""
+        async with sse.connect_sse(
+            request.scope,
+            request.receive,
+            request._send,  # type: ignore
+        ) as streams:
+            await mcp._mcp_server.run(
+                streams[0],
+                streams[1],
+                mcp._mcp_server.create_initialization_options(),
+            )
+
+    async def handle_mcp_post(request: Request):
+        """Handle POST /mcp - stateless request/response."""
+        # Use the SSE transport's message handler
+        await sse.handle_post_message(
+            request.scope,
+            request.receive,
+            request._send,  # type: ignore
+        )
+
+    # Create app with unified /mcp endpoint
     app = Starlette(
         debug=log_level == 'DEBUG',
         routes=[
             Route('/health', endpoint=health_check, methods=['GET']),
             Route('/info', endpoint=server_info, methods=['GET']),
-            # OAuth 2.0 Authorization Server Metadata (RFC 8414)
             Route(
                 '/.well-known/oauth-authorization-server', endpoint=oauth_metadata, methods=['GET']
             ),
-            # MCP endpoint - Mount FastMCP's SSE app directly (it's an ASGI app)
-            Mount('/mcp', app=sse_app),
+            Route('/mcp', endpoint=handle_mcp_get, methods=['GET']),
+            Route('/mcp', endpoint=handle_mcp_post, methods=['POST']),
         ],
     )
-
-    # Add authentication middleware
-    app.middleware('http')(simple_auth_middleware)
 
     return app
 
@@ -215,8 +186,10 @@ def main():
     logger.info('Endpoints:')
     logger.info(f'  Health Check: {protocol}://{HOST}:{PORT}/health')
     logger.info(f'  Server Info: {protocol}://{HOST}:{PORT}/info')
-    logger.info(f'  MCP SSE Endpoint: {protocol}://{HOST}:{PORT}/mcp')
-    logger.info(f'  MCP Messages: {protocol}://{HOST}:{PORT}/messages/{{sessionId}}')
+    logger.info(
+        f'  OAuth Metadata: {protocol}://{HOST}:{PORT}/.well-known/oauth-authorization-server'
+    )
+    logger.info(f'  MCP Streamable HTTP (GET/POST): {protocol}://{HOST}:{PORT}/mcp')
 
     # Create the app
     app = create_app()
