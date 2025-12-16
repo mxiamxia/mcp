@@ -96,7 +96,7 @@ async def simple_auth_middleware(request: Request, call_next):
             headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
         )
 
-    logger.debug(f'Request authenticated with key: {provided_key[:8]}...')
+    logger.info(f'Request authenticated with key: {provided_key[:8]}...')
     return await call_next(request)
 
 
@@ -141,13 +141,8 @@ def create_app() -> Starlette:
     # Create SSE transport - use /mcp as the base path for messages
     sse = SseServerTransport('/messages/')
 
-    async def handle_sse(request: Request) -> None:
-        """Handle SSE connections for MCP protocol.
-
-        This establishes the bidirectional connection between client and server
-        using Server-Sent Events for server-to-client messages and POST for
-        client-to-server messages.
-        """
+    async def handle_sse_get(request: Request) -> None:
+        """Handle SSE GET requests for establishing bidirectional connection."""
         logger.info(f'New SSE connection from {request.client}')
         async with sse.connect_sse(
             request.scope,
@@ -161,15 +156,27 @@ def create_app() -> Starlette:
                 mcp._mcp_server.create_initialization_options(),
             )
 
+    async def handle_mcp_post(request: Request) -> None:
+        """Handle POST requests to /mcp endpoint (stateless mode)."""
+        logger.info(f'MCP POST request from {request.client}')
+        # For stateless POST requests, use the message handler
+        await sse.handle_post_message(
+            request.scope,
+            request.receive,
+            request._send,  # type: ignore[reportPrivateUsage]
+        )
+
     # Create Starlette app with routes
     app = Starlette(
         debug=log_level == 'DEBUG',
         routes=[
             Route('/health', endpoint=health_check, methods=['GET']),
             Route('/info', endpoint=server_info, methods=['GET']),
-            # SSE endpoint for establishing the connection
-            Route('/mcp', endpoint=handle_sse, methods=['GET', 'POST']),
-            # Message endpoint for client-to-server messages
+            # SSE endpoint for establishing the connection (GET)
+            Route('/mcp', endpoint=handle_sse_get, methods=['GET']),
+            # Stateless endpoint (POST)
+            Route('/mcp', endpoint=handle_mcp_post, methods=['POST']),
+            # Message endpoint for client-to-server messages (for stateful SSE sessions)
             Mount('/messages/', app=sse.handle_post_message),
         ],
     )
