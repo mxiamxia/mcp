@@ -45,10 +45,10 @@ log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO'
 
 
 async def simple_auth_middleware(request: Request, call_next):
-    """Simple authentication middleware that accepts any API key.
+    """Simple authentication middleware that requires API key.
 
-    This is a pass-through authentication for development/testing.
-    In production, implement proper authentication logic here.
+    This middleware enforces authentication for MCP endpoints and returns
+    proper 401 responses with WWW-Authenticate headers when auth is required.
     """
     # Debug logging: print request details
     logger.info(f'Request URL: {request.url}')
@@ -57,36 +57,46 @@ async def simple_auth_middleware(request: Request, call_next):
     logger.info(f'Request Headers: {dict(request.headers)}')
     logger.info(f'Request Client: {request.client}')
 
-    # Skip auth for health check, info, and MCP endpoints
-    # CloudFront may strip custom headers, so we allow MCP endpoints without auth
-    if request.url.path in ['/health', '/info'] or request.url.path.startswith('/messages/'):
+    # Skip auth for health check and info endpoints only
+    if request.url.path in ['/health', '/info']:
         return await call_next(request)
 
-    # If MCP_API_KEY is set, check for it (basic validation)
-    if MCP_API_KEY:
-        auth_header = request.headers.get('Authorization', '')
-        api_key = request.headers.get('X-API-Key', '')
+    # Check for authentication headers
+    auth_header = request.headers.get('Authorization', '')
+    api_key = request.headers.get('X-API-Key', '')
 
-        # Accept either Bearer token or X-API-Key header
-        if not (auth_header.startswith('Bearer ') or api_key):
-            logger.warning('Request missing API key or Authorization header')
-            return JSONResponse(
-                {
-                    'error': 'Missing authentication. Provide Authorization: Bearer <token> or X-API-Key header'
-                },
-                status_code=401,
-            )
+    # Accept either Bearer token or X-API-Key header
+    if not (auth_header.startswith('Bearer ') or api_key):
+        logger.warning('Request missing API key or Authorization header')
+        # Return 401 with WWW-Authenticate header for MCP client discovery
+        return JSONResponse(
+            {
+                'error': 'Missing authentication. Provide Authorization: Bearer <token> or X-API-Key header'
+            },
+            status_code=401,
+            headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
+        )
 
-        # For this simple implementation, any non-empty key is accepted
-        provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
-        if not provided_key:
-            logger.warning('Empty API key provided')
-            return JSONResponse({'error': 'Invalid authentication credentials'}, status_code=401)
+    # Validate the provided key
+    provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
+    if not provided_key:
+        logger.warning('Empty API key provided')
+        return JSONResponse(
+            {'error': 'Invalid authentication credentials'},
+            status_code=401,
+            headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
+        )
 
-        logger.debug(f'Request authenticated with key: {provided_key[:8]}...')
-    else:
-        logger.debug('No MCP_API_KEY set - authentication is disabled')
+    # If MCP_API_KEY is set, validate against it; otherwise accept any non-empty key
+    if MCP_API_KEY and provided_key != MCP_API_KEY:
+        logger.warning(f'Invalid API key provided: {provided_key[:8]}...')
+        return JSONResponse(
+            {'error': 'Invalid authentication credentials'},
+            status_code=401,
+            headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
+        )
 
+    logger.debug(f'Request authenticated with key: {provided_key[:8]}...')
     return await call_next(request)
 
 
