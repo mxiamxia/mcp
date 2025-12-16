@@ -21,11 +21,10 @@ import uvicorn
 # Import the FastMCP instance from the existing server
 from .server import AWS_REGION, mcp
 from loguru import logger
-from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 
 # Get configuration from environment variables
@@ -154,61 +153,19 @@ async def oauth_metadata(request: Request):
 def create_app() -> Starlette:
     """Create the Starlette application with MCP SSE transport.
 
-    This uses FastMCP's internal SSE transport which implements the
-    MCP Streamable HTTP protocol correctly.
+    This uses FastMCP's built-in SSE app which supports both stateless
+    and stateful modes.
     """
-    # Create SSE transport - use /mcp as the base path for messages
-    sse = SseServerTransport('/messages/')
+    # Get FastMCP's built-in SSE app
+    sse_app = mcp.sse_app()
 
-    async def handle_mcp(request: Request):
-        """Handle MCP requests - both stateless POST and SSE GET.
+    async def handle_mcp(scope, receive, send):
+        """Delegate all MCP requests to FastMCP's SSE app.
 
-        For stateless mode: Direct POST with JSON request/response
-        For SSE mode: GET request establishing event stream
+        FastMCP handles both stateless POST and SSE GET automatically.
         """
-        logger.info(f'MCP request from {request.client}, method: {request.method}')
-
-        # Stateless mode: Direct POST request with JSON
-        if request.method == 'POST':
-            try:
-                # Read the JSON body
-                body = await request.json()
-                logger.info(f'Stateless POST request: {body.get("method", "unknown")}')
-
-                # Handle the request directly using the MCP server
-                from mcp.types import JSONRPCMessage
-
-                request_msg = JSONRPCMessage(**body)
-
-                # Process the request
-                response = await mcp._mcp_server.handle_request(request_msg)
-
-                logger.info(f'Stateless response: {response}')
-                return JSONResponse(
-                    response.model_dump() if hasattr(response, 'model_dump') else response
-                )
-            except Exception as e:
-                logger.error(f'Error in stateless handler: {e}', exc_info=True)
-                return JSONResponse({'error': str(e)}, status_code=500)
-
-        # SSE mode: GET request for event stream
-        else:
-            logger.info(f'SSE connection from {request.client}')
-            try:
-                async with sse.connect_sse(
-                    request.scope,
-                    request.receive,
-                    request._send,  # type: ignore[reportPrivateUsage]
-                ) as streams:
-                    logger.info('SSE streams established, starting MCP server')
-                    await mcp._mcp_server.run(
-                        streams[0],
-                        streams[1],
-                        mcp._mcp_server.create_initialization_options(),
-                    )
-                    logger.info('MCP server run completed')
-            except Exception as e:
-                logger.error(f'Error in SSE handler: {e}', exc_info=True)
+        logger.info(f'MCP request: {scope.get("method")} from {scope.get("client")}')
+        await sse_app(scope, receive, send)
 
     # Create Starlette app with routes
     app = Starlette(
@@ -220,10 +177,8 @@ def create_app() -> Starlette:
             Route(
                 '/.well-known/oauth-authorization-server', endpoint=oauth_metadata, methods=['GET']
             ),
-            # MCP endpoint - supports both stateless POST and SSE GET
+            # MCP endpoint - FastMCP's SSE app handles both stateless and stateful modes
             Route('/mcp', endpoint=handle_mcp, methods=['GET', 'POST']),
-            # Message endpoint for client-to-server messages
-            Mount('/messages/', app=sse.handle_post_message),
         ],
     )
 
