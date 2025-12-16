@@ -156,15 +156,70 @@ def create_app() -> Starlette:
                 mcp._mcp_server.create_initialization_options(),
             )
 
-    async def handle_mcp_post(request: Request) -> None:
+    async def handle_mcp_post(request: Request):
         """Handle POST requests to /mcp endpoint (stateless mode)."""
+        import json
+
         logger.info(f'MCP POST request from {request.client}')
-        # For stateless POST requests, use the message handler
-        await sse.handle_post_message(
-            request.scope,
-            request.receive,
-            request._send,  # type: ignore[reportPrivateUsage]
-        )
+
+        try:
+            # Read and parse the JSON-RPC request
+            body = await request.body()
+            message = json.loads(body.decode('utf-8'))
+
+            logger.debug(f'Received JSON-RPC message: {message}')
+
+            # Handle the request based on method
+            method = message.get('method')
+            params = message.get('params', {})
+            request_id = message.get('id')
+
+            if method == 'tools/list':
+                tools = await mcp.list_tools()
+                response = {
+                    'jsonrpc': '2.0',
+                    'id': request_id,
+                    'result': {'tools': [tool.model_dump() for tool in tools]},
+                }
+            elif method == 'tools/call':
+                tool_name = params.get('name')
+                tool_args = params.get('arguments', {})
+                result = await mcp.call_tool(tool_name, tool_args)
+                response = {
+                    'jsonrpc': '2.0',
+                    'id': request_id,
+                    'result': result.model_dump() if hasattr(result, 'model_dump') else result,
+                }
+            else:
+                response = {
+                    'jsonrpc': '2.0',
+                    'id': request_id,
+                    'error': {'code': -32601, 'message': f'Method not found: {method}'},
+                }
+
+            logger.debug(f'Sending JSON-RPC response: {response}')
+            return JSONResponse(response)
+
+        except json.JSONDecodeError as e:
+            logger.error(f'Invalid JSON in request: {e}')
+            return JSONResponse(
+                {
+                    'jsonrpc': '2.0',
+                    'id': None,
+                    'error': {'code': -32700, 'message': 'Parse error', 'data': str(e)},
+                },
+                status_code=400,
+            )
+        except Exception as e:
+            logger.error(f'Error processing MCP request: {e}', exc_info=True)
+            return JSONResponse(
+                {
+                    'jsonrpc': '2.0',
+                    'id': message.get('id') if 'message' in locals() else None,
+                    'error': {'code': -32603, 'message': 'Internal error', 'data': str(e)},
+                },
+                status_code=500,
+            )
 
     # Create Starlette app with routes
     app = Starlette(
