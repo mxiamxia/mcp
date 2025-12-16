@@ -45,11 +45,10 @@ log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO'
 
 
 async def simple_auth_middleware(request: Request, call_next):
-    """Simple authentication middleware that always returns 401 for MCP endpoints.
+    """Simple authentication middleware that requires API key.
 
-    WORKAROUND: This middleware always returns 401 with WWW-Authenticate header
-    for MCP endpoints to fix handshake detection bug in MCP client.
-    The client's handshake logic requires 401 to detect that auth is configured.
+    This middleware enforces authentication for MCP endpoints and returns
+    proper 401 responses with WWW-Authenticate headers when auth is required.
     """
     # Debug logging: print request details
     logger.info(f'Request URL: {request.url}')
@@ -62,16 +61,43 @@ async def simple_auth_middleware(request: Request, call_next):
     if request.url.path in ['/health', '/info']:
         return await call_next(request)
 
-    # WORKAROUND: Always return 401 for MCP endpoints to ensure handshake detection works
-    # The MCP client expects 401 to detect auth is configured, even when credentials are correct
-    logger.info('Returning 401 for MCP endpoint to support handshake detection')
-    return JSONResponse(
-        {
-            'error': 'Authentication required. Provide Authorization: Bearer <token> or X-API-Key header'
-        },
-        status_code=401,
-        headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
-    )
+    # Check for authentication headers
+    auth_header = request.headers.get('Authorization', '')
+    api_key = request.headers.get('X-API-Key', '')
+
+    # Accept either Bearer token or X-API-Key header
+    if not (auth_header.startswith('Bearer ') or api_key):
+        logger.warning('Request missing API key or Authorization header')
+        # Return 401 with WWW-Authenticate header for MCP client discovery
+        return JSONResponse(
+            {
+                'error': 'Missing authentication. Provide Authorization: Bearer <token> or X-API-Key header'
+            },
+            status_code=401,
+            headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
+        )
+
+    # Validate the provided key
+    provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
+    if not provided_key:
+        logger.warning('Empty API key provided')
+        return JSONResponse(
+            {'error': 'Invalid authentication credentials'},
+            status_code=401,
+            headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
+        )
+
+    # If MCP_API_KEY is set, validate against it; otherwise accept any non-empty key
+    if MCP_API_KEY and provided_key != MCP_API_KEY:
+        logger.warning(f'Invalid API key provided: {provided_key[:8]}...')
+        return JSONResponse(
+            {'error': 'Invalid authentication credentials'},
+            status_code=401,
+            headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
+        )
+
+    logger.info(f'Request authenticated with key: {provided_key[:8]}...')
+    return await call_next(request)
 
 
 async def health_check(request: Request):
