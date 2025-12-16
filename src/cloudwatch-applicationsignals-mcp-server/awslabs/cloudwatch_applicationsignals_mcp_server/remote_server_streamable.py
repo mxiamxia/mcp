@@ -62,7 +62,7 @@ async def simple_auth_middleware(request: Request, call_next):
         '/health',
         '/info',
         '/.well-known/oauth-authorization-server',
-    ] or request.url.path.startswith('/messages/'):
+    ] or request.url.path.startswith(('/messages/', '/mcp')):
         return await call_next(request)
 
     # If MCP_API_KEY is set, check for it (basic validation)
