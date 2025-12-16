@@ -69,8 +69,8 @@ BATCH_SIZE_THRESHOLD = 5
 
 RUN_STATES = {'RUNNING': 'RUNNING', 'PASSED': 'PASSED', 'FAILED': 'FAILED'}
 
-# Initialize FastMCP server
-mcp = FastMCP('cloudwatch-applicationsignals')
+# Initialize FastMCP server with stateless HTTP support
+mcp = FastMCP('cloudwatch-applicationsignals', stateless_http=True)
 
 # Configure logging
 log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATION_SIGNALS_LOG_LEVEL', 'INFO').upper()

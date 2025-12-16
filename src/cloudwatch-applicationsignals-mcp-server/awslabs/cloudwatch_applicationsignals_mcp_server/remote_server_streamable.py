@@ -160,30 +160,55 @@ def create_app() -> Starlette:
     # Create SSE transport - use /mcp as the base path for messages
     sse = SseServerTransport('/messages/')
 
-    async def handle_sse(request: Request) -> None:
-        """Handle SSE connections for MCP protocol.
+    async def handle_mcp(request: Request):
+        """Handle MCP requests - both stateless POST and SSE GET.
 
-        This establishes the bidirectional connection between client and server
-        using Server-Sent Events for server-to-client messages and POST for
-        client-to-server messages.
+        For stateless mode: Direct POST with JSON request/response
+        For SSE mode: GET request establishing event stream
         """
-        logger.info(f'New SSE connection from {request.client}')
-        try:
-            async with sse.connect_sse(
-                request.scope,
-                request.receive,
-                request._send,  # type: ignore[reportPrivateUsage]
-            ) as streams:
-                logger.info('SSE streams established, starting MCP server')
-                # Run the MCP server with the established streams
-                await mcp._mcp_server.run(
-                    streams[0],  # read stream
-                    streams[1],  # write stream
-                    mcp._mcp_server.create_initialization_options(),
+        logger.info(f'MCP request from {request.client}, method: {request.method}')
+
+        # Stateless mode: Direct POST request with JSON
+        if request.method == 'POST':
+            try:
+                # Read the JSON body
+                body = await request.json()
+                logger.info(f'Stateless POST request: {body.get("method", "unknown")}')
+
+                # Handle the request directly using the MCP server
+                from mcp.types import JSONRPCMessage
+
+                request_msg = JSONRPCMessage(**body)
+
+                # Process the request
+                response = await mcp._mcp_server.handle_request(request_msg)
+
+                logger.info(f'Stateless response: {response}')
+                return JSONResponse(
+                    response.model_dump() if hasattr(response, 'model_dump') else response
                 )
-                logger.info('MCP server run completed')
-        except Exception as e:
-            logger.error(f'Error in SSE handler: {e}', exc_info=True)
+            except Exception as e:
+                logger.error(f'Error in stateless handler: {e}', exc_info=True)
+                return JSONResponse({'error': str(e)}, status_code=500)
+
+        # SSE mode: GET request for event stream
+        else:
+            logger.info(f'SSE connection from {request.client}')
+            try:
+                async with sse.connect_sse(
+                    request.scope,
+                    request.receive,
+                    request._send,  # type: ignore[reportPrivateUsage]
+                ) as streams:
+                    logger.info('SSE streams established, starting MCP server')
+                    await mcp._mcp_server.run(
+                        streams[0],
+                        streams[1],
+                        mcp._mcp_server.create_initialization_options(),
+                    )
+                    logger.info('MCP server run completed')
+            except Exception as e:
+                logger.error(f'Error in SSE handler: {e}', exc_info=True)
 
     # Create Starlette app with routes
     app = Starlette(
@@ -195,8 +220,8 @@ def create_app() -> Starlette:
             Route(
                 '/.well-known/oauth-authorization-server', endpoint=oauth_metadata, methods=['GET']
             ),
-            # SSE endpoint for establishing the connection
-            Route('/mcp', endpoint=handle_sse, methods=['GET', 'POST']),
+            # MCP endpoint - supports both stateless POST and SSE GET
+            Route('/mcp', endpoint=handle_mcp, methods=['GET', 'POST']),
             # Message endpoint for client-to-server messages
             Mount('/messages/', app=sse.handle_post_message),
         ],
