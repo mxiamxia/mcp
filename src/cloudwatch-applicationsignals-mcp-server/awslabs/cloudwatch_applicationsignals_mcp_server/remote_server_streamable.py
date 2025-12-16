@@ -24,7 +24,7 @@ from loguru import logger
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 
 # Get configuration from environment variables
@@ -156,16 +156,8 @@ def create_app() -> Starlette:
     This uses FastMCP's built-in SSE app which supports both stateless
     and stateful modes.
     """
-    # Get FastMCP's built-in SSE app
+    # Get FastMCP's built-in SSE app (this is an ASGI app)
     sse_app = mcp.sse_app()
-
-    async def handle_mcp(scope, receive, send):
-        """Delegate all MCP requests to FastMCP's SSE app.
-
-        FastMCP handles both stateless POST and SSE GET automatically.
-        """
-        logger.info(f'MCP request: {scope.get("method")} from {scope.get("client")}')
-        await sse_app(scope, receive, send)
 
     # Create Starlette app with routes
     app = Starlette(
@@ -177,8 +169,8 @@ def create_app() -> Starlette:
             Route(
                 '/.well-known/oauth-authorization-server', endpoint=oauth_metadata, methods=['GET']
             ),
-            # MCP endpoint - FastMCP's SSE app handles both stateless and stateful modes
-            Route('/mcp', endpoint=handle_mcp, methods=['GET', 'POST']),
+            # MCP endpoint - Mount FastMCP's SSE app directly (it's an ASGI app)
+            Mount('/mcp', app=sse_app),
         ],
     )
 
