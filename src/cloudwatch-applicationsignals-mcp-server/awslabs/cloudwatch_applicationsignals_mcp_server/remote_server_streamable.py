@@ -21,9 +21,11 @@ import uvicorn
 # Import the FastMCP instance from the existing server
 from .server import AWS_REGION, mcp
 from loguru import logger
+from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
 
 
 # Get configuration from environment variables
@@ -42,7 +44,52 @@ SSL_CERTFILE = os.environ.get('SSL_CERTFILE', '/home/ec2-user/ssl/server.crt')
 log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO').upper()
 
 
-# Custom route handlers
+async def simple_auth_middleware(request: Request, call_next):
+    """Simple authentication middleware that accepts any API key.
+
+    This is a pass-through authentication for development/testing.
+    In production, implement proper authentication logic here.
+    """
+    # Debug logging: print request details
+    logger.info(f'Request URL: {request.url}')
+    logger.info(f'Request Path: {request.url.path}')
+    logger.info(f'Request Method: {request.method}')
+    logger.info(f'Request Headers: {dict(request.headers)}')
+    logger.info(f'Request Client: {request.client}')
+
+    # Skip auth for health check, info, and MCP endpoints
+    # CloudFront may strip custom headers, so we allow MCP endpoints without auth
+    if request.url.path in ['/health', '/info'] or request.url.path.startswith('/messages/'):
+        return await call_next(request)
+
+    # If MCP_API_KEY is set, check for it (basic validation)
+    if MCP_API_KEY:
+        auth_header = request.headers.get('Authorization', '')
+        api_key = request.headers.get('X-API-Key', '')
+
+        # Accept either Bearer token or X-API-Key header
+        if not (auth_header.startswith('Bearer ') or api_key):
+            logger.warning('Request missing API key or Authorization header')
+            return JSONResponse(
+                {
+                    'error': 'Missing authentication. Provide Authorization: Bearer <token> or X-API-Key header'
+                },
+                status_code=401,
+            )
+
+        # For this simple implementation, any non-empty key is accepted
+        provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
+        if not provided_key:
+            logger.warning('Empty API key provided')
+            return JSONResponse({'error': 'Invalid authentication credentials'}, status_code=401)
+
+        logger.debug(f'Request authenticated with key: {provided_key[:8]}...')
+    else:
+        logger.debug('No MCP_API_KEY set - authentication is disabled')
+
+    return await call_next(request)
+
+
 async def health_check(request: Request):
     """Health check endpoint for load balancers and monitoring."""
     return JSONResponse(
@@ -75,77 +122,50 @@ async def server_info(request: Request):
     )
 
 
-async def oauth_metadata(request: Request):
-    """OAuth 2.0 Authorization Server Metadata endpoint.
-
-    Returns metadata indicating that this server does not require OAuth authorization.
-    This satisfies MCP clients that check for authorization capabilities without
-    actually implementing OAuth.
-    """
-    # Get the base URL from the request
-    base_url = f'{request.url.scheme}://{request.url.netloc}'
-
-    return JSONResponse(
-        {
-            'issuer': base_url,
-            'authorization_endpoint': f'{base_url}/authorize',
-            'token_endpoint': f'{base_url}/token',
-            'grant_types_supported': ['authorization_code', 'client_credentials'],
-            'response_types_supported': ['code'],
-            'token_endpoint_auth_methods_supported': ['none'],
-            'code_challenge_methods_supported': ['S256'],
-            # Indicate that authorization is optional/not required
-            'authorization_required': False,
-        }
-    )
-
-
 def create_app() -> Starlette:
-    """Create the Starlette application with MCP Streamable HTTP transport.
+    """Create the Starlette application with MCP SSE transport.
 
-    This creates an app with a unified /mcp endpoint that handles both GET (SSE)
-    and POST (stateless requests) according to the MCP Streamable HTTP spec.
+    This uses FastMCP's internal SSE transport which implements the
+    MCP Streamable HTTP protocol correctly.
     """
-    from mcp.server.sse import SseServerTransport
-    from starlette.routing import Route
+    # Create SSE transport - use /mcp as the base path for messages
+    sse = SseServerTransport('/messages/')
 
-    # Create SSE transport
-    sse = SseServerTransport('/messages')
+    async def handle_sse(request: Request) -> None:
+        """Handle SSE connections for MCP protocol.
 
-    async def handle_mcp(request: Request):
-        """Handle /mcp endpoint - both GET (SSE) and POST (stateless)."""
-        if request.method == 'GET':
-            # Handle GET - establish SSE stream
-            async with sse.connect_sse(
-                request.scope,
-                request.receive,
-                request._send,  # type: ignore
-            ) as streams:
-                await mcp._mcp_server.run(
-                    streams[0],
-                    streams[1],
-                    mcp._mcp_server.create_initialization_options(),
-                )
-        elif request.method == 'POST':
-            # Handle POST - stateless request/response
-            await sse.handle_post_message(
-                request.scope,
-                request.receive,
-                request._send,  # type: ignore
+        This establishes the bidirectional connection between client and server
+        using Server-Sent Events for server-to-client messages and POST for
+        client-to-server messages.
+        """
+        logger.info(f'New SSE connection from {request.client}')
+        async with sse.connect_sse(
+            request.scope,
+            request.receive,
+            request._send,  # type: ignore[reportPrivateUsage]
+        ) as streams:
+            # Run the MCP server with the established streams
+            await mcp._mcp_server.run(
+                streams[0],  # read stream
+                streams[1],  # write stream
+                mcp._mcp_server.create_initialization_options(),
             )
 
-    # Create app with unified /mcp endpoint
+    # Create Starlette app with routes
     app = Starlette(
         debug=log_level == 'DEBUG',
         routes=[
             Route('/health', endpoint=health_check, methods=['GET']),
             Route('/info', endpoint=server_info, methods=['GET']),
-            Route(
-                '/.well-known/oauth-authorization-server', endpoint=oauth_metadata, methods=['GET']
-            ),
-            Route('/mcp', endpoint=handle_mcp, methods=['GET', 'POST']),
+            # SSE endpoint for establishing the connection
+            Route('/mcp', endpoint=handle_sse, methods=['GET', 'POST']),
+            # Message endpoint for client-to-server messages
+            Mount('/messages/', app=sse.handle_post_message),
         ],
     )
+
+    # Add authentication middleware
+    app.middleware('http')(simple_auth_middleware)
 
     return app
 
@@ -185,10 +205,8 @@ def main():
     logger.info('Endpoints:')
     logger.info(f'  Health Check: {protocol}://{HOST}:{PORT}/health')
     logger.info(f'  Server Info: {protocol}://{HOST}:{PORT}/info')
-    logger.info(
-        f'  OAuth Metadata: {protocol}://{HOST}:{PORT}/.well-known/oauth-authorization-server'
-    )
-    logger.info(f'  MCP Streamable HTTP (GET/POST): {protocol}://{HOST}:{PORT}/mcp')
+    logger.info(f'  MCP SSE Endpoint: {protocol}://{HOST}:{PORT}/mcp')
+    logger.info(f'  MCP Messages: {protocol}://{HOST}:{PORT}/messages/{{sessionId}}')
 
     # Create the app
     app = create_app()
