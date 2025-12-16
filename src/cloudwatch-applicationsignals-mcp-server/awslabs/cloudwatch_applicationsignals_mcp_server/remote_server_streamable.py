@@ -112,19 +112,27 @@ def create_app() -> Starlette:
     # Create SSE transport
     sse = SseServerTransport('/messages')
 
-    async def handle_mcp(scope, receive, send):
+    async def handle_mcp(request: Request):
         """Handle /mcp endpoint - both GET (SSE) and POST (stateless)."""
-        if scope['method'] == 'GET':
+        if request.method == 'GET':
             # Handle GET - establish SSE stream
-            async with sse.connect_sse(scope, receive, send) as streams:
+            async with sse.connect_sse(
+                request.scope,
+                request.receive,
+                request._send,  # type: ignore
+            ) as streams:
                 await mcp._mcp_server.run(
                     streams[0],
                     streams[1],
                     mcp._mcp_server.create_initialization_options(),
                 )
-        elif scope['method'] == 'POST':
+        elif request.method == 'POST':
             # Handle POST - stateless request/response
-            await sse.handle_post_message(scope, receive, send)
+            await sse.handle_post_message(
+                request.scope,
+                request.receive,
+                request._send,  # type: ignore
+            )
 
     # Create app with unified /mcp endpoint
     app = Starlette(
