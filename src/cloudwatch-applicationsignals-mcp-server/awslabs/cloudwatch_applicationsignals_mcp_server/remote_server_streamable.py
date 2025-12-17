@@ -62,9 +62,9 @@ async def simple_auth_middleware(request: Request, call_next):
     logger.info(f'Request Headers: {dict(request.headers)}')
     logger.info(f'Request Client: {request.client}')
 
-    # SPECIAL CASE: /mcp endpoint always returns 401 for handshake detection
-    if request.url.path == '/mcp':
-        logger.info('MCP endpoint request, returning 401 for handshake detection')
+    # SPECIAL CASE: /mcp GET endpoint always returns 401 for handshake detection
+    if request.url.path == '/mcp' and request.method == 'GET':
+        logger.info('MCP GET endpoint request, returning 401 for handshake detection')
         return JSONResponse(
             {
                 'error': 'Authentication required. Provide Authorization: Bearer <token> or X-API-Key header'
