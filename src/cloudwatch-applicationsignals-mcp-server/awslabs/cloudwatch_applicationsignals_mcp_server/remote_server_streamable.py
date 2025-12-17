@@ -62,6 +62,20 @@ async def simple_auth_middleware(request: Request, call_next):
     logger.info(f'Request Headers: {dict(request.headers)}')
     logger.info(f'Request Client: {request.client}')
 
+    # Log request body if present
+    if request.method in ['POST', 'PUT', 'PATCH']:
+        try:
+            body = await request.body()
+            logger.info(f'Request Body: {body.decode("utf-8") if body else "(empty)"}')
+
+            # Important: Store body for later use since it can only be read once
+            async def receive():
+                return {'type': 'http.request', 'body': body}
+
+            request._receive = receive
+        except Exception as e:
+            logger.warning(f'Failed to read request body: {e}')
+
     # SPECIAL CASE: /mcp GET endpoint always returns 401 for handshake detection
     if request.url.path == '/mcp' and request.method == 'GET':
         logger.info('MCP GET endpoint request, returning 401 for handshake detection')
