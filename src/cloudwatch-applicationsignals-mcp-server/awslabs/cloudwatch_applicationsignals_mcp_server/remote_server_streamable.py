@@ -45,10 +45,11 @@ log_level = os.environ.get('MCP_CLOUDWATCH_APPLICATIONSIGNALS_LOG_LEVEL', 'INFO'
 
 
 async def simple_auth_middleware(request: Request, call_next):
-    """Simple authentication middleware that requires API key.
+    """Simple authentication middleware that handles MCP handshake detection.
 
-    This middleware enforces authentication for MCP endpoints and returns
-    proper 401 responses with WWW-Authenticate headers when auth is required.
+    This middleware enforces authentication for all endpoints except:
+    - /health and /info (no auth required)
+    - /mcp (always returns 401 for MCP client handshake detection)
     """
     # Debug logging: print request details
     logger.info(f'Request URL: {request.url}')
@@ -61,7 +62,18 @@ async def simple_auth_middleware(request: Request, call_next):
     if request.url.path in ['/health', '/info']:
         return await call_next(request)
 
-    # Check for authentication headers
+    # SPECIAL CASE: /mcp endpoint always returns 401 for handshake detection
+    if request.url.path == '/mcp':
+        logger.info('MCP endpoint request, returning 401 for handshake detection')
+        return JSONResponse(
+            {
+                'error': 'Authentication required. Provide Authorization: Bearer <token> or X-API-Key header'
+            },
+            status_code=401,
+            headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
+        )
+
+    # For all other endpoints: validate authentication normally
     auth_header = request.headers.get('Authorization', '')
     api_key = request.headers.get('X-API-Key', '')
 
