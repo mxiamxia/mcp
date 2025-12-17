@@ -62,11 +62,17 @@ async def simple_auth_middleware(request: Request, call_next):
     logger.info(f'Request Headers: {dict(request.headers)}')
     logger.info(f'Request Client: {request.client}')
 
-    # Log request body if present
+    # Log request body if present and check for handshake detection
+    is_tools_list_request = False
     if request.method in ['POST', 'PUT', 'PATCH']:
         try:
             body = await request.body()
-            logger.info(f'Request Body: {body.decode("utf-8") if body else "(empty)"}')
+            body_str = body.decode('utf-8') if body else ''
+            logger.info(f'Request Body: {body_str if body_str else "(empty)"}')
+
+            # Check if this is a tools/list request (handshake detection)
+            if '"method":"tools/list"' in body_str:
+                is_tools_list_request = True
 
             # Important: Store body for later use since it can only be read once
             async def receive():
@@ -76,9 +82,11 @@ async def simple_auth_middleware(request: Request, call_next):
         except Exception as e:
             logger.warning(f'Failed to read request body: {e}')
 
-    # SPECIAL CASE: /mcp GET endpoint always returns 401 for handshake detection
-    if request.url.path == '/mcp' and request.method == 'GET':
-        logger.info('MCP GET endpoint request, returning 401 for handshake detection')
+    # SPECIAL CASE: /mcp endpoint returns 401 for handshake detection
+    # - Always return 401 for GET requests
+    # - Return 401 for POST requests with "method":"tools/list" (handshake)
+    if request.url.path == '/mcp' and (request.method == 'GET' or is_tools_list_request):
+        logger.info('MCP handshake request detected, returning 401 for handshake detection')
         return JSONResponse(
             {
                 'error': 'Authentication required. Provide Authorization: Bearer <token> or X-API-Key header'
