@@ -51,16 +51,16 @@ async def simple_auth_middleware(request: Request, call_next):
     - /health and /info (no auth required)
     - /mcp (always returns 401 for MCP client handshake detection)
     """
-    # Debug logging: print request details
+    # Skip auth for health check and info endpoints only
+    if request.url.path in ['/health', '/info']:
+        return await call_next(request)
+
+    # Debug logging: print request details (except for /health)
     logger.info(f'Request URL: {request.url}')
     logger.info(f'Request Path: {request.url.path}')
     logger.info(f'Request Method: {request.method}')
     logger.info(f'Request Headers: {dict(request.headers)}')
     logger.info(f'Request Client: {request.client}')
-
-    # Skip auth for health check and info endpoints only
-    if request.url.path in ['/health', '/info']:
-        return await call_next(request)
 
     # SPECIAL CASE: /mcp endpoint always returns 401 for handshake detection
     if request.url.path == '/mcp':
