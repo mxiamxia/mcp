@@ -62,17 +62,12 @@ async def simple_auth_middleware(request: Request, call_next):
     logger.info(f'Request Headers: {dict(request.headers)}')
     logger.info(f'Request Client: {request.client}')
 
-    # Log request body if present and check for handshake detection
-    is_tools_list_request = False
+    # Log request body if present
     if request.method in ['POST', 'PUT', 'PATCH']:
         try:
             body = await request.body()
             body_str = body.decode('utf-8') if body else ''
             logger.info(f'Request Body: {body_str if body_str else "(empty)"}')
-
-            # Check if this is a tools/list request (handshake detection)
-            if '"method":"tools/list"' in body_str:
-                is_tools_list_request = True
 
             # Important: Store body for later use since it can only be read once
             async def receive():
@@ -84,15 +79,15 @@ async def simple_auth_middleware(request: Request, call_next):
 
     # SPECIAL CASE: /mcp endpoint returns 401 for handshake detection
     # - Return 401 for POST requests with "method":"tools/list" (handshake)
-    if request.url.path == '/mcp' and is_tools_list_request:
-        logger.info('MCP handshake request detected, returning 401 for handshake detection')
-        return JSONResponse(
-            {
-                'error': 'Authentication required. Provide Authorization: Bearer <token> or X-API-Key header'
-            },
-            status_code=401,
-            headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
-        )
+    # if request.url.path == '/mcp' and is_tools_list_request:
+    #     logger.info('MCP handshake request detected, returning 401 for handshake detection')
+    #     return JSONResponse(
+    #         {
+    #             'error': 'Authentication required. Provide Authorization: Bearer <token> or X-API-Key header'
+    #         },
+    #         status_code=401,
+    #         headers={'WWW-Authenticate': 'Bearer realm="MCP Server", charset="UTF-8"'},
+    #     )
 
     # For all other endpoints: validate authentication normally
     auth_header = request.headers.get('Authorization', '')
