@@ -83,9 +83,8 @@ async def simple_auth_middleware(request: Request, call_next):
             logger.warning(f'Failed to read request body: {e}')
 
     # SPECIAL CASE: /mcp endpoint returns 401 for handshake detection
-    # - Always return 401 for GET requests
     # - Return 401 for POST requests with "method":"tools/list" (handshake)
-    if request.url.path == '/mcp' and (request.method == 'GET' or is_tools_list_request):
+    if request.url.path == '/mcp' and is_tools_list_request:
         logger.info('MCP handshake request detected, returning 401 for handshake detection')
         return JSONResponse(
             {
