@@ -202,7 +202,23 @@ def create_app() -> Starlette:
             params = message.get('params', {})
             request_id = message.get('id')
 
-            if method == 'tools/list':
+            if method == 'initialize':
+                # Handle MCP initialize request
+                response = {
+                    'jsonrpc': '2.0',
+                    'id': request_id,
+                    'result': {
+                        'protocolVersion': '2025-03-26',
+                        'capabilities': {
+                            'tools': {},
+                        },
+                        'serverInfo': {
+                            'name': 'cloudwatch-applicationsignals-mcp-server',
+                            'version': '0.1.19',
+                        },
+                    },
+                }
+            elif method == 'tools/list':
                 tools = await mcp.list_tools()
                 response = {
                     'jsonrpc': '2.0',
