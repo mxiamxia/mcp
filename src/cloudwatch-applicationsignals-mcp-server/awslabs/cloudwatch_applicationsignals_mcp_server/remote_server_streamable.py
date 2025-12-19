@@ -237,9 +237,9 @@ def create_app() -> Starlette:
             elif method == 'tools/call':
                 tool_name = params.get('name')
                 tool_args = params.get('arguments', {})
-                logger.debug(f'Calling tool {tool_name} with args: {tool_args}')
+                logger.info(f'Calling tool {tool_name} with args: {tool_args}')
                 result = await mcp.call_tool(tool_name, tool_args)
-                logger.debug(f'Tool result type: {type(result)}')
+                logger.info(f'Tool result type: {type(result)}')
 
                 # Serialize result by converting to JSON string and back to dict
                 # This handles nested Pydantic models like TextContent
