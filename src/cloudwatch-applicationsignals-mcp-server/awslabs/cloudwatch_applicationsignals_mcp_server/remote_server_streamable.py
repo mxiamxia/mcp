@@ -178,14 +178,14 @@ def create_app() -> Starlette:
     # Create SSE transport - use /mcp as the base path for messages
     sse = SseServerTransport('/messages/')
 
-    async def handle_sse_get(request: Request) -> None:
-        """Handle SSE GET requests for establishing bidirectional connection."""
-        logger.info(f'New SSE connection from {request.client}')
-        async with sse.connect_sse(
-            request.scope,
-            request.receive,
-            request._send,  # type: ignore[reportPrivateUsage]
-        ) as streams:
+    async def handle_sse_get(scope, receive, send):
+        """Handle SSE GET requests for establishing bidirectional connection.
+
+        This is an ASGI application, not a Starlette endpoint, so it uses
+        the ASGI interface (scope, receive, send) directly.
+        """
+        logger.info(f'New SSE connection from {scope.get("client")}')
+        async with sse.connect_sse(scope, receive, send) as streams:
             # Run the MCP server with the established streams
             await mcp._mcp_server.run(
                 streams[0],  # read stream
@@ -341,16 +341,40 @@ def create_app() -> Starlette:
                 status_code=500,
             )
 
+    # Create combined MCP endpoint that handles both GET (SSE) and POST (stateless)
+    async def handle_mcp_endpoint(scope, receive, send):
+        """Combined ASGI app for /mcp that routes based on HTTP method."""
+        method = scope.get('method', '')
+
+        if method == 'GET':
+            # Handle SSE connection
+            await handle_sse_get(scope, receive, send)
+        elif method == 'POST':
+            # Convert ASGI to Starlette Request and handle stateless POST
+            from starlette.requests import Request
+            from starlette.responses import Response
+
+            request = Request(scope, receive, send)
+            response = await handle_mcp_post(request)
+
+            # Send the response
+            if response:
+                await response(scope, receive, send)
+        else:
+            # Method not allowed
+            from starlette.responses import Response
+
+            response = Response('Method not allowed', status_code=405)
+            await response(scope, receive, send)
+
     # Create Starlette app with routes
     app = Starlette(
         debug=log_level == 'DEBUG',
         routes=[
             Route('/health', endpoint=health_check, methods=['GET']),
             Route('/info', endpoint=server_info, methods=['GET']),
-            # SSE endpoint for establishing the connection (GET)
-            Route('/mcp', endpoint=handle_sse_get, methods=['GET']),
-            # Stateless endpoint (POST)
-            Route('/mcp', endpoint=handle_mcp_post, methods=['POST']),
+            # Combined MCP endpoint (handles both GET for SSE and POST for stateless)
+            Mount('/mcp', app=handle_mcp_endpoint),
             # Message endpoint for client-to-server messages (for stateful SSE sessions)
             Mount('/messages/', app=sse.handle_post_message),
         ],
