@@ -235,11 +235,17 @@ def create_app() -> Starlette:
                 tools_list = []
                 for tool in tools:
                     tool_dict = tool.model_dump()
-                    # Remove outputSchema if present - our tools return text, not structured data
+
+                    # Log to see if outputSchema is present
                     if 'outputSchema' in tool_dict:
+                        logger.info(
+                            f"Tool '{tool_dict.get('name')}' has outputSchema: {tool_dict['outputSchema']}"
+                        )
                         del tool_dict['outputSchema']
+
                     tools_list.append(tool_dict)
 
+                logger.info(f'Returning {len(tools_list)} tools in tools/list response')
                 response = {
                     'jsonrpc': '2.0',
                     'id': request_id,
