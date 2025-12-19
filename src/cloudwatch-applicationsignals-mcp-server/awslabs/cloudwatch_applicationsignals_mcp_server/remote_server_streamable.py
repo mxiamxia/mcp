@@ -252,6 +252,11 @@ def create_app() -> Starlette:
                         result_dict = result.model_dump()
                     else:
                         result_dict = result
+
+                    # Log the result_dict to see its structure
+                    logger.info(f'Result dict type: {type(result_dict)}')
+                    logger.info(f'Result dict preview: {str(result_dict)[:500]}')
+
                 except Exception as e:
                     logger.error(f'Failed to serialize result: {e}', exc_info=True)
                     raise
