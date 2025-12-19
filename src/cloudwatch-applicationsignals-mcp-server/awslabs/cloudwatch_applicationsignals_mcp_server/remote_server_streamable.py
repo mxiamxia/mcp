@@ -238,10 +238,13 @@ def create_app() -> Starlette:
                 tool_name = params.get('name')
                 tool_args = params.get('arguments', {})
                 result = await mcp.call_tool(tool_name, tool_args)
+                # Use model_dump(mode='json') to properly serialize nested Pydantic models like TextContent
                 response = {
                     'jsonrpc': '2.0',
                     'id': request_id,
-                    'result': result.model_dump() if hasattr(result, 'model_dump') else result,
+                    'result': result.model_dump(mode='json')
+                    if hasattr(result, 'model_dump')
+                    else result,
                 }
             else:
                 response = {
