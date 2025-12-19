@@ -244,7 +244,19 @@ def create_app() -> Starlette:
                 # Serialize result by converting to JSON string and back to dict
                 # This handles nested Pydantic models like TextContent
                 try:
-                    if hasattr(result, 'model_dump_json'):
+                    # FastMCP returns a tuple: (content_list, metadata_dict)
+                    # We need to serialize the TextContent objects in content_list
+                    if isinstance(result, tuple) and len(result) == 2:
+                        content_list, metadata_dict = result
+                        # Serialize each TextContent object in the list
+                        serialized_content = []
+                        for content in content_list:
+                            if hasattr(content, 'model_dump'):
+                                serialized_content.append(content.model_dump())
+                            else:
+                                serialized_content.append(content)
+                        result_dict = {'content': serialized_content, 'isError': False}
+                    elif hasattr(result, 'model_dump_json'):
                         result_json = result.model_dump_json()
                         logger.debug(f'Serialized to JSON: {result_json[:200]}...')
                         result_dict = json.loads(result_json)
