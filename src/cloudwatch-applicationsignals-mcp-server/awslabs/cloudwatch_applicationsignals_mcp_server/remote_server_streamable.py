@@ -268,7 +268,7 @@ def create_app() -> Starlette:
                     'error': {'code': -32601, 'message': f'Method not found: {method}'},
                 }
 
-            logger.debug(f'Sending JSON-RPC response: {response}')
+            logger.info(f'Sending JSON-RPC response: {response}')
             return JSONResponse(response)
 
         except json.JSONDecodeError as e:
