@@ -246,8 +246,12 @@ def create_app() -> Starlette:
                 try:
                     # FastMCP returns a tuple: (content_list, metadata_dict)
                     # We need to serialize the TextContent objects in content_list
+                    # and return in MCP CallToolResult format
                     if isinstance(result, tuple) and len(result) == 2:
                         content_list, metadata_dict = result
+
+                        logger.info(f'Metadata dict: {metadata_dict}')
+
                         # Serialize each TextContent object in the list
                         serialized_content = []
                         for content in content_list:
@@ -255,7 +259,13 @@ def create_app() -> Starlette:
                                 serialized_content.append(content.model_dump())
                             else:
                                 serialized_content.append(content)
-                        result_dict = {'content': serialized_content, 'isError': False}
+
+                        # Return MCP CallToolResult format with metadata
+                        result_dict = {
+                            'content': serialized_content,
+                            'isError': False,
+                            **metadata_dict,  # Include any additional metadata
+                        }
                     elif hasattr(result, 'model_dump_json'):
                         result_json = result.model_dump_json()
                         logger.debug(f'Serialized to JSON: {result_json[:200]}...')
@@ -273,6 +283,7 @@ def create_app() -> Starlette:
                     logger.error(f'Failed to serialize result: {e}', exc_info=True)
                     raise
 
+                # For tools/call, the result should be directly the CallToolResult, not wrapped
                 response = {
                     'jsonrpc': '2.0',
                     'id': request_id,
