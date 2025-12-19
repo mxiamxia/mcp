@@ -53,7 +53,11 @@ async def simple_auth_middleware(request: Request, call_next):
     """
     # Skip auth for health check and info endpoints only
     if request.url.path in ['/health', '/info']:
-        return await call_next(request)
+        response = await call_next(request)
+        logger.info(
+            f'Response Status: {response.status_code} for {request.method} {request.url.path}'
+        )
+        return response
 
     # Debug logging: print request details (except for /health)
     logger.info(f'Request URL: {request.url}')
@@ -96,6 +100,7 @@ async def simple_auth_middleware(request: Request, call_next):
     # Accept either Bearer token or X-API-Key header
     if not (auth_header.startswith('Bearer ') or api_key):
         logger.warning('Request missing API key or Authorization header')
+        logger.info(f'Response Status: 401 for {request.method} {request.url.path}')
         # Return 401 with WWW-Authenticate header for MCP client discovery
         return JSONResponse(
             {
@@ -109,6 +114,7 @@ async def simple_auth_middleware(request: Request, call_next):
     provided_key = auth_header.replace('Bearer ', '') if auth_header else api_key
     if not provided_key:
         logger.warning('Empty API key provided')
+        logger.info(f'Response Status: 401 for {request.method} {request.url.path}')
         return JSONResponse(
             {'error': 'Invalid authentication credentials'},
             status_code=401,
@@ -118,6 +124,7 @@ async def simple_auth_middleware(request: Request, call_next):
     # If MCP_API_KEY is set, validate against it; otherwise accept any non-empty key
     if MCP_API_KEY and provided_key != MCP_API_KEY:
         logger.warning(f'Invalid API key provided: {provided_key[:8]}...')
+        logger.info(f'Response Status: 401 for {request.method} {request.url.path}')
         return JSONResponse(
             {'error': 'Invalid authentication credentials'},
             status_code=401,
@@ -125,7 +132,9 @@ async def simple_auth_middleware(request: Request, call_next):
         )
 
     logger.info(f'Request authenticated with key: {provided_key[:8]}...')
-    return await call_next(request)
+    response = await call_next(request)
+    logger.info(f'Response Status: {response.status_code} for {request.method} {request.url.path}')
+    return response
 
 
 async def health_check(request: Request):
