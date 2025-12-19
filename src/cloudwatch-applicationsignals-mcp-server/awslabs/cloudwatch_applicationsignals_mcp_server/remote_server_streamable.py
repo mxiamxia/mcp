@@ -260,11 +260,15 @@ def create_app() -> Starlette:
                             else:
                                 serialized_content.append(content)
 
-                        # Return MCP CallToolResult format with metadata
+                        # Return MCP CallToolResult format
+                        # Exclude 'result' from metadata to avoid duplicate content
+                        filtered_metadata = {
+                            k: v for k, v in metadata_dict.items() if k != 'result'
+                        }
                         result_dict = {
                             'content': serialized_content,
                             'isError': False,
-                            **metadata_dict,  # Include any additional metadata
+                            **filtered_metadata,  # Include metadata but exclude 'result'
                         }
                     elif hasattr(result, 'model_dump_json'):
                         result_json = result.model_dump_json()
