@@ -229,10 +229,21 @@ def create_app() -> Starlette:
                 }
             elif method == 'tools/list':
                 tools = await mcp.list_tools()
+                # Remove outputSchema from tool definitions since our tools return text content
+                # not structured content. This prevents MCP clients from expecting structuredContent
+                # in the response.
+                tools_list = []
+                for tool in tools:
+                    tool_dict = tool.model_dump()
+                    # Remove outputSchema if present - our tools return text, not structured data
+                    if 'outputSchema' in tool_dict:
+                        del tool_dict['outputSchema']
+                    tools_list.append(tool_dict)
+
                 response = {
                     'jsonrpc': '2.0',
                     'id': request_id,
-                    'result': {'tools': [tool.model_dump() for tool in tools]},
+                    'result': {'tools': tools_list},
                 }
             elif method == 'tools/call':
                 tool_name = params.get('name')
